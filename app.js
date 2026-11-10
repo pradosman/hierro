@@ -474,7 +474,7 @@ function viewWorkout() {
     <p>${d.items.length ? esc(d.items.map(it => exById(it.ex).name).join(', ')) : 'No exercises yet'}</p>
     ${chips(d.items.map(it => it.ex))}</div>
     <span class="box ${done ? 'on' : ''}">${done ? I.check : ''}</span></button>`; };
-  return `${hero('Workout', hbtn('toggleCal', I.cal, 'Calendar', ui.cal ? 'aria-pressed="true"' : '') + hbtn('plusSheet', I.plus, 'Add') + (p ? hbtn('progMenu', I.dots, 'Program options') : ''))}
+  return `${hero('Workout', hbtn('toggleCal', I.cal, 'Calendar', ui.cal ? 'aria-pressed="true"' : '') + hbtn('plusSheet', I.plus, 'Add') + hbtn('sheet', I.dots, 'More', 'data-type="wmore"'))}
     ${ui.cal ? `<div class="cal top">${strip}</div>` : `<div class="week top">${strip}</div>`}
     <section class="pad">
       ${S.active ? `<button class="btn primary" data-act="resume">Resume Workout</button>` : ''}
@@ -485,8 +485,8 @@ function viewWorkout() {
           <button class="ic" data-act="toggleProg" aria-label="Collapse">${ui.progOpen ? I.up : I.down}</button></div>
         ${ui.progOpen ? p.days.map(row).join('') : ''}
       </div>` : `<div class="card empty"><p class="muted">No active program. Pick one from the library below.</p></div>`}
-      <div class="h2row"><h2>Workout Library</h2></div>
-      ${TEMPLATES.map((t, i) => `<div class="card prog">
+      ${S.settings.hideLib ? '' : `<div class="h2row"><h2>Workout Library</h2></div>`}
+      ${(S.settings.hideLib ? [] : TEMPLATES).map((t, i) => `<div class="card prog">
         <div class="prog-head"><span class="sq ${['red', 'blue', 'green'][i % 3]}">${I.puzzle}</span>
           <button class="grow" data-act="toggleLib" data-i="${i}"><b>${esc(t.name)}</b><span>${t.days.length} workouts</span></button>
           <button class="ic" data-act="toggleLib" data-i="${i}" aria-label="Expand">${ui.lib === i ? I.up : I.down}</button></div>
@@ -742,6 +742,12 @@ function viewSheet() {
     return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>${esc(ex.name)}</h2><span></span></div>
       <div class="tabsrow even intabs">${[['inst', 'Instructions'], ['det', 'Details'], ['hist', 'History']].map(([k, l]) => `<button data-act="infoTab" data-t="${k}" aria-selected="${tab === k}">${l}</button>`).join('')}</div>
       <div class="infobody">${body1}</div>`; }
+  if (m.type === 'wmore') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>More</h2><span></span></div>
+      <div class="srows">${mrow('startFree', I.enter, 'Start Empty Workout')}${mrow('open', I.hist, 'Workout History', 'data-screen="history"')}${mrow('sheet', I.sliders, 'Customize Sections', 'data-type="sections"')}${S.program ? mrow('progMenu', I.edit, 'Edit Program') : ''}<div class="mrow">${I.gym}<span>Archive<small>Archive is empty</small></span>${I.right}</div></div>`;
+  if (m.type === 'sections') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Customize Sections</h2><span></span></div>
+      <label class="field switch tsw first"><span><b>Active Program</b>Show your current program on the Workout tab</span><input type="checkbox" checked disabled></label>
+      <label class="field switch tsw"><span><b>Workout Library</b>Show the starter programs under your active program</span><input type="checkbox" data-bind="showLib" ${S.settings.hideLib ? '' : 'checked'}></label>
+      <button class="btn primary" data-act="close">Done</button>`;
   if (m.type === 'swap') { const it = S.active.items[ui.cur], ex = exById(it.ex);
     const line = e => `${e.muscle}${(e.sec || []).length ? ' • ' + e.sec.join(', ') : ''}`;
     const subs = allEx().map(fixEx).filter(e => e.id !== ex.id && e.muscle === ex.muscle).sort((a, b) => (b.equip === ex.equip) - (a.equip === ex.equip) || a.name.localeCompare(b.name)).slice(0, 6);
@@ -973,6 +979,7 @@ const binds = {
   note(el) { const k = ui.noteTab, pi = progItem(); if (k === 'session') S.active.note = el.value; else if (k === 'exercise') curItem().note = el.value; else if (pi) pi.note = el.value; const c = document.getElementById('noteCount'); if (c) c.textContent = el.value.length + '/300'; },
   tset(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(), q = it.sets[d.s]; q['t' + d.f] = Math.round(n); if (T(it, q, 'hi') < T(it, q, 'lo')) q.thi = T(it, q, 'lo'); },
   restOn(el) { curItem().restOn = el.checked; },
+  showLib(el) { S.settings.hideLib = !el.checked; },
   planUp(el) { if (ui.done) ui.done.planUp = el.checked; },
   aitem(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(); it[d.f] = Math.round(n); if (it.hi < it.lo) it.hi = it.lo; },
   itemRest(el) { const n = num(el.value); if (n != null) curItem().rest = Math.max(0, Math.round(n)); },

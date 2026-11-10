@@ -474,3 +474,6 @@ main[class^="screen-"] { padding-bottom: calc(env(safe-area-inset-bottom) + 24px
 .pbottom .btn { width: auto; border-radius: 26px; padding: 12px 22px; }
 .pk.cur { border-bottom: 2px solid var(--line); padding-bottom: 16px; }
 .subh { margin: 6px 0 0; font-size: 17px; font-weight: 500; }
+.mrow small { display: block; color: var(--mut); font-size: 14px; }
+.tsw.first { border-top: 0 !important; }
+.switch input:disabled { opacity: .5; }
