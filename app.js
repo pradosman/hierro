@@ -1,4 +1,4 @@
-import { EXERCISES, MUSCLES, TEMPLATES } from './data.js';
+import { EXERCISES, MUSCLES, UPPER, LOWER, TEMPLATES } from './data.js';
 
 // ---------- Guardado ----------
 const KEY = 'hierro.v1';
@@ -26,7 +26,9 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const num = v => { if (v === '' || v == null) return null; const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; };
 const kg = n => (n == null ? '' : String(Math.round(n * 100) / 100));
 const allEx = () => EXERCISES.concat(S.custom);
-const exById = id => allEx().find(e => e.id === id) || { id, name: 'Deleted exercise', muscle: 'Chest', sec: [], equip: 'Machine', inc: 2.5 };
+const LEGACY = { Back: 'Lats', Shoulders: 'Side Delts', Pecho: 'Chest', Espalda: 'Lats', Hombro: 'Side Delts', 'Bíceps': 'Biceps', 'Tríceps': 'Triceps', 'Cuádriceps': 'Quads', Isquios: 'Hamstrings', 'Glúteo': 'Glutes', Gemelo: 'Calves', Abdomen: 'Abs' };
+const fixEx = e => (e && LEGACY[e.muscle] ? { ...e, muscle: LEGACY[e.muscle], sec: (e.sec || []).map(m => LEGACY[m] || m) } : e);
+const exById = id => fixEx(allEx().find(e => e.id === id)) || { id, name: 'Deleted exercise', muscle: 'Chest', sec: [], equip: 'Machine', inc: 2.5 };
 const isWork = s => s.type !== 'w';
 const e1rm = (w, r, rir) => w * (1 + (r + (rir || 0)) / 30);
 const dayLabel = ts => new Date(ts).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -116,19 +118,31 @@ const ARM = 'M44 109 Q50 104 55.500 109 L54 137 Q50 147 44.500 143 Q40 126 44 10
 const FOREARM = 'M40 150 Q47 152 51.500 148 L42 198 Q36 204 30.500 200 Q34 175 40 150 Z';
 const PARTS = {
   front: {
-    _: ['M91 57 Q84 63 73 67 L90 68 Z', FOREARM, 'M95.500 226 Q99 223 99 229 L96 262 Q94 245 95.500 226 Z', 'M79 320 Q84 318 85 324 Q86 350 81 380 L77 380 Z'],
-    Shoulders: [DELT],
+    Neck: ['M93 46 L99.500 46 L99.500 58 L92.500 56 Z'],
+    'Upper Traps': ['M91 57.500 Q84 63 73 67 L90 68 Z'],
+    'Front Delts': ['M60 71 Q54.500 72 53 80 Q52 92 54.500 100 Q60 94 62 85 Q65 77 60 71 Z'],
+    'Side Delts': ['M52 73 Q46 76 45 89 Q44 98 47 105 Q50 103 52 100 Q49.500 90 51 80 Z'],
     Chest: ['M68 72 Q66 72 65 78 Q62 92 68 102 Q76 110 88 108 Q97 106 97.500 100 L97.500 75 Q97.500 72 94 72 Z'],
     Biceps: [ARM],
-    Abs: [rr(85, 112, 12.500, 11), rr(85, 125.500, 12.500, 11), rr(85, 139, 12.500, 11), 'M85 153.500 h12.500 v26 q-9 -3 -12.500 -13 z', 'M66 110 Q74 114 81 114 L82 170 Q72 166 66 150 Z'],
-    Quads: ['M61 215 Q69 208 76 212 L76 298 Q70 301 67 296 Q58 256 61 215 Z', 'M79 212 Q88 210 93 219 Q94 260 87 296 Q83 300 79 298 Z'],
+    Forearms: [FOREARM],
+    Serratus: ['M67 107 L80 112 L80 116.500 L67 113.500 Z', 'M67 116 L80 119 L80 123.500 L67 122.500 Z'],
+    Obliques: ['M67 125 Q74 127.500 81 126.500 L82 170 Q72 166 67 150 Z'],
+    Abs: [rr(85, 112, 12.500, 11), rr(85, 125.500, 12.500, 11), rr(85, 139, 12.500, 11), 'M85 153.500 h12.500 v26 q-9 -3 -12.500 -13 z'],
+    Abductors: ['M60.500 182 Q62 175 66 173 L65 210 Q61.500 204 60.500 194 Z'],
+    Adductors: ['M94.500 222 Q99 221 99 228 L96.500 268 Q93.500 246 94.500 222 Z'],
+    Quads: ['M61 215 Q69 208 76 212 L76 298 Q70 301 67 296 Q58 256 61 215 Z', 'M79 212 Q88 210 92 219 Q93 260 87 296 Q83 300 79 298 Z'],
+    Tibs: ['M79 320 Q84 318 85 324 Q86 350 81 380 L77 380 Z'],
     Calves: ['M66 319 Q71 314 76 318 L75 380 L70 380 Q64 348 66 319 Z'],
   },
   back: {
-    _: [FOREARM],
-    Back: ['M92 54 L97.500 54 L97.500 102 L72 72 Q85 66 92 54 Z', 'M66 82 L95 108 L95 150 Q80 146 70 132 Q63 108 66 82 Z', 'M84 155 L97.500 153 L97.500 176 L84 174 Z'],
-    Shoulders: [DELT],
+    Neck: ['M93 46 L99.500 46 L99.500 53 L93 53 Z'],
+    'Upper Traps': ['M92 54.500 L97.500 54.500 L97.500 75 L74 70 Q85 65 92 54.500 Z'],
+    'Upper Back': ['M71 72.500 L97.500 77.500 L97.500 104 L86 97 Z'],
+    'Rear Delts': [DELT],
+    Lats: ['M66 82 L84 98 L95 108 L95 150 Q80 146 70 132 Q63 108 66 82 Z'],
+    'Lower Back': ['M84 155 L97.500 153 L97.500 176 L84 174 Z'],
     Triceps: [ARM],
+    Forearms: [FOREARM],
     Glutes: ['M66 181 Q82 175 97.500 181 L97.500 214 Q84 222 68 214 Q62 198 66 181 Z'],
     Hamstrings: ['M64 223 Q78 227 93 221 Q94 262 86 296 Q76 300 68 296 Q60 258 64 223 Z'],
     Calves: ['M66 317 Q76 309 85 319 Q88 345 80 367 L72 367 Q62 345 66 317 Z'],
@@ -136,7 +150,7 @@ const PARTS = {
 };
 function body(levels, side, cls = '', box = '0 0 200 420') {
   const half = Object.entries(PARTS[side]).map(([m, paths]) => {
-    const lv = m === '_' ? 0 : (levels[m] || 0);
+    const lv = levels[m] || 0;
     const style = lv > 0 ? `class="lit" style="fill-opacity:${(0.35 + 0.65 * Math.min(1, lv)).toFixed(2)}"` : 'class="dim"';
     return paths.map(d => `<path d="${d}" ${style}/>`).join('');
   }).join('');
@@ -144,9 +158,10 @@ function body(levels, side, cls = '', box = '0 0 200 420') {
     <g class="sil">${HEAD}${HALF_BASE}<g transform="translate(200 0) scale(-1 1)">${HALF_BASE}</g></g>
     <g class="mus">${half}<g transform="translate(200 0) scale(-1 1)">${half}</g></g></svg>`;
 }
-const FRONT = ['Chest', 'Shoulders', 'Biceps', 'Abs', 'Quads'];
+const FRONT = ['Chest', 'Front Delts', 'Side Delts', 'Biceps', 'Abs', 'Obliques', 'Serratus', 'Quads', 'Adductors', 'Abductors', 'Tibs'];
 // Recorte de la figura alrededor de cada músculo, para las tarjetas pequeñas.
-const CROP = { Chest: '40 44 120 112', Shoulders: '22 40 156 146', Biceps: '22 62 156 146', Triceps: '22 62 156 146', Abs: '40 84 120 112', Back: '40 44 120 112', Quads: '45 196 110 103', Hamstrings: '45 204 110 103', Glutes: '45 150 110 103', Calves: '45 296 110 103' };
+const TORSO = '40 44 120 112', ARMS = '22 44 156 146', MID = '40 92 120 112', THIGH = '45 190 110 103', SHIN = '45 296 110 103';
+const CROP = { Chest: TORSO, 'Upper Back': TORSO, Lats: '40 64 120 112', 'Upper Traps': '45 30 110 103', Neck: '50 22 100 93', Serratus: '40 70 120 112', 'Front Delts': ARMS, 'Side Delts': ARMS, 'Rear Delts': ARMS, Biceps: '22 62 156 146', Triceps: '22 62 156 146', Forearms: '0 122 110 103', Abs: MID, Obliques: MID, 'Lower Back': MID, Quads: THIGH, Hamstrings: THIGH, Adductors: THIGH, Abductors: '45 150 110 103', Glutes: '45 150 110 103', Calves: SHIN, Tibs: SHIN };
 const miniBody = m => body({ [m]: 1 }, FRONT.includes(m) ? 'front' : 'back', 'mini', CROP[m]);
 
 // ---------- Regla de progreso ----------
@@ -600,7 +615,7 @@ function viewLevels() {
       ${body(lv, ui.back ? 'back' : 'front')}
       <button class="fab" data-act="flip" aria-label="Flip body">${I.flip}</button>
       <p class="legend"><i></i>Average weekly sets over <u>1-month</u></p></section>
-    <section class="pad">${sec('Upper Body Levels', ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Abs'])}${sec('Lower Body Levels', ['Quads', 'Hamstrings', 'Glutes', 'Calves'])}</section>`;
+    <section class="pad">${sec('Upper Body Levels', UPPER)}${sec('Lower Body Levels', LOWER)}</section>`;
 }
 
 function viewAnalytics() {
