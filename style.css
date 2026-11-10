@@ -412,3 +412,22 @@ main[class^="screen-"] { padding-bottom: calc(env(safe-area-inset-bottom) + 24px
 .emptycard svg { color: var(--mid); width: 30px; height: 30px; }
 .sheet .mrow { padding: 0 4px; } .sheet .mrow + .mrow::before { left: 46px; }
 .sheet .hscroll .mcard { min-width: 170px; }
+
+/* ---- Workout Targets y Note, según la app real ---- */
+.shead h2 small { display: block; font-size: 14px; font-weight: 400; color: var(--mut); }
+.banner { display: flex; gap: 14px; align-items: flex-start; background: #1d3a6e; border-radius: 10px; padding: 14px; font-size: 15px; }
+.banner svg { color: #8db4ff; margin-top: 2px; } .banner b { display: block; font-weight: 500; }
+.ttable { display: flex; flex-direction: column; gap: 10px; }
+.trow { display: grid; grid-template-columns: 40px 1fr 1fr 1fr 40px; gap: 8px; align-items: center; text-align: center; font-size: 14px; }
+.trow.head { font-weight: 600; }
+.trow input { height: 38px; min-width: 0; width: 100%; border-radius: 6px; border: 2px solid transparent; background: var(--fill); text-align: center; font-size: 15px; }
+.trow input:focus { outline: 0; border-color: var(--ink); background: var(--top); } .trow input:disabled { opacity: .4; }
+.trow button { display: grid; place-items: center; height: 38px; }
+.tsw { border-top: 2px solid var(--line) !important; padding-top: 14px !important; }
+.tsw span { color: var(--mut); font-size: 14px; } .tsw b { display: block; color: var(--ink); font-size: 16px; font-weight: 500; }
+.lrow { display: flex; justify-content: space-between; color: var(--ink); } .lrow b { font-weight: 500; } .lrow em { font-style: normal; color: var(--mut); }
+.intabs button { display: flex; align-items: center; justify-content: center; gap: 6px; } .intabs svg { width: 16px; height: 16px; }
+.tsw input[type=checkbox], .switch input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 52px; height: 32px; border-radius: 16px; background: var(--mid); position: relative; flex: none; transition: background .15s; }
+.tsw input[type=checkbox]::after, .switch input[type=checkbox]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 13px; background: #fff; transition: transform .15s; }
+.tsw input[type=checkbox]:checked, .switch input[type=checkbox]:checked { background: var(--ink); }
+.tsw input[type=checkbox]:checked::after, .switch input[type=checkbox]:checked::after { transform: translateX(20px); background: var(--top); }

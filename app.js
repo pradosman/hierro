@@ -19,7 +19,7 @@ function load() {
 let S = load();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Could not save. The phone is out of space.'); } };
 
-const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, cal: false, dashPage: 0, recMode: '1rm', infoTab: 'inst', warmMode: 'smart', range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
+const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, cal: false, dashPage: 0, recMode: '1rm', infoTab: 'inst', warmMode: 'smart', noteTab: 'session', range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
 
 // ---------- Ayudas ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -176,9 +176,11 @@ function retarget(item, fill) {
     if (!isWork(s)) return;
     const t = suggest(item, wi++);
     s.tw = t.tw; s.tr = t.tr; s.prev = t.prev ? { w: t.prev.w, r: t.prev.r, rir: t.prev.rir } : null;
-    if (fill && !s.done) { s.w = t.tw != null ? kg(t.tw) : ''; s.r = String(t.tr != null ? t.tr : Math.round((item.lo + item.hi) / 2)); s.rir = String(item.rir); }
+    if (fill && !s.done) { s.w = t.tw != null ? kg(t.tw) : ''; s.r = String(t.tr != null ? t.tr : Math.round((item.lo + item.hi) / 2)); s.rir = String(T(item, s, 'rir')); }
   });
 }
+const T = (it, s, f) => (s && s['t' + f] != null ? s['t' + f] : it[f]);
+const progItem = () => { const a = S.active; if (!a || a.dayIdx == null || !S.program || !S.program.days[a.dayIdx]) return null; return S.program.days[a.dayIdx].items.find(x => x.ex === a.items[ui.cur].ex) || null; };
 const newSet = type => ({ type: type || 'n', w: '', r: '', rir: '', partial: false, done: false, tw: null, tr: null, prev: null });
 function newItem(src) {
   const item = { ex: src.ex, lo: src.lo, hi: src.hi, rir: src.rir, rest: src.rest, note: '', sets: [] };
@@ -204,7 +206,7 @@ function completeSet(i, s) {
   if (!r || r < 1) { toast('Enter the reps.'); return false; }
   set.w = kg(w); set.r = String(Math.round(r));
   set.done = true;
-  if (isWork(set)) startRest(item.rest);
+  if (isWork(set) && item.restOn !== false) startRest(T(item, set, 'rest'));
   return true;
 }
 function bestOf(sets) {
@@ -246,7 +248,7 @@ function finishWorkout() {
     const oldVol = Math.max(0, ...S.history.flatMap(h => h.items.filter(x => x.ex === it.ex).map(x => x.sets.filter(isWork).reduce((n, s) => n + s.w * s.r, 0))));
     if (vol > oldVol && vol > 0) records.push({ ex: it.ex, kind: 'Volume Record', val: `${Math.round(vol).toLocaleString('en-US')} kg` });
   });
-  const entry = { id: uid(), start: a.start, end: Date.now(), dayName: a.dayName, dayIdx: a.dayIdx, prog: a.dayIdx != null, items };
+  const entry = { id: uid(), start: a.start, end: Date.now(), note: a.note || '', dayName: a.dayName, dayIdx: a.dayIdx, prog: a.dayIdx != null, items };
   S.history.push(entry);
   if (a.dayIdx != null && S.program) S.nextDay = (a.dayIdx + 1) % S.program.days.length;
   S.active = null; stopRest();
@@ -519,7 +521,8 @@ function viewActive() {
       <button data-act="sheet" data-type="targets">${I.target}Targets</button>
       <button data-act="pick" data-for="swap" data-muscle="${esc(ex.muscle)}">${I.swap}Swap</button>
       <button data-act="noteSheet">${I.note}Note</button>
-      <button data-act="delEx">${I.trash}Remove</button></div>
+      <button data-act="sheet" data-type="equip">${I.gym}Equipment</button>
+      <button data-act="sheet" data-type="exMore">${I.dots}More</button></div>
         <div class="grid">
       <div class="row head"><span>Set</span><button data-act="colMode">${ui.colMode === 'prev' ? 'Previous' : 'Auto'} ${I.swap}</button><span>kg</span><span>Reps</span>
         <button class="box ${it.sets.length && doneCount === it.sets.length ? 'on' : ''}" data-act="checkAll" aria-label="Check all sets">${it.sets.length && doneCount === it.sets.length ? I.check : ''}</button></div>
@@ -528,7 +531,7 @@ function viewActive() {
         let mid = '-';
         if (s.type === 'w') mid = 'Warm Up';
         else if (ui.colMode === 'prev') mid = s.prev ? `${s.prev.w ? kg(s.prev.w) + ' kg x ' : ''}${s.prev.r}${s.prev.rir != null ? `<small>${s.prev.rir} RIR</small>` : ''}` : '-';
-        else mid = `${s.tw ? kg(s.tw) + ' kg x ' + s.tr + '+' : it.lo + '-' + it.hi + ' reps'}<small>${it.rir} RIR</small>`;
+        else mid = `${s.tw ? kg(s.tw) + ' kg x ' + s.tr + '+' : T(it, s, 'lo') + '-' + T(it, s, 'hi') + ' reps'}<small>${T(it, s, 'rir')} RIR</small>`;
         const f = ui.focus && ui.focus.s === j ? ui.focus.f : null;
         return `<div class="row ${s.done ? 'done' : ''}">
           <button class="num" data-act="setMenu" data-s="${j}" aria-label="Set options">${label}</button>
@@ -539,7 +542,7 @@ function viewActive() {
         </div>`; }).join('')}
       <button class="num add" data-act="addSet" aria-label="Add set">${I.plus}</button>
     </div>
-    <button class="notecard" data-act="noteSheet"><b>Program Note</b>${I.pin}<span>${esc(it.note) || 'Standard Set'}</span></button>` : `<div class="pad"><p class="muted">This workout is empty. Tap + to add an exercise.</p></div>`}
+    <button class="notecard" data-act="noteSheet"><b>Program Note</b>${I.pin}<span>${esc((progItem() || {}).note) || 'Standard Set'}</span></button>` : `<div class="pad"><p class="muted">This workout is empty. Tap + to add an exercise.</p></div>`}
     ${ui.focus && it ? keypad(it, ex) : ''}`;
 }
 
@@ -671,7 +674,16 @@ function viewSheet() {
     <button class="btn primary" data-act="start" data-i="${m.i}">Start Workout</button><button class="btn" data-act="editProgram" data-i="${m.i}">Edit</button>`; }
   if (m.type === 'wmenu') return `<h2 class="center">Workout Options</h2>${opt('minimize', I.down, 'Minimize workout')}${opt('finish', I.check, 'Finish workout')}${opt('sheet', I.timer, 'Workout settings', 'data-type="rest"')}${opt('sheet', I.gym, 'Gym settings', 'data-type="equip"')}${opt('discard', I.trash, 'Discard workout', 'style="color:var(--red)"')}`;
   if (m.type === 'discard') return `<h2>Discard this workout?</h2><p class="muted">Your progress will be lost and this workout will not be saved.</p><button class="btn red" data-act="discardYes">Discard</button><button class="btn danger plain" data-act="close">Go Back</button>`;
-  if (m.type === 'targets') { const it = S.active.items[ui.cur]; return `<h2>Targets</h2><div class="grid5 four">${[['lo', 'Min reps'], ['hi', 'Max reps'], ['rir', 'RIR'], ['rest', 'Rest (sec)']].map(([f, l]) => `<label>${l}<input inputmode="numeric" data-bind="aitem" data-f="${f}" value="${it[f]}"></label>`).join('')}</div><button class="btn primary" data-act="retargetClose">Done</button>`; }
+  if (m.type === 'targets') { const it = S.active.items[ui.cur]; let n = 0;
+    const cell = (j, f, v, off) => `<input inputmode="numeric" data-bind="tset" data-s="${j}" data-f="${f}" value="${v}" ${off ? 'disabled' : ''} aria-label="${f}">`;
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Workout Targets<small>${esc(exById(it.ex).name)}</small></h2><span></span></div>
+      <div class="banner">${I.target}<p><b>Today's targets</b>These changes are for this workout only. Edit the program to change them for good.</p></div>
+      <div class="ttable"><div class="trow head"><span>Set</span><span>Reps Min</span><span>Reps Max</span><span>Rest</span><span>RIR</span></div>
+      ${it.sets.map((q, j) => isWork(q) ? `<div class="trow"><span class="num">${++n}</span>${cell(j, 'lo', T(it, q, 'lo'))}${cell(j, 'hi', T(it, q, 'hi'))}${cell(j, 'rest', T(it, q, 'rest'), it.restOn === false)}<button data-act="trir" data-s="${j}" aria-label="Change RIR">${rirBadge(T(it, q, 'rir'))}</button></div>` : '').join('')}
+      <button class="num add" data-act="addSetKeep" aria-label="Add set">${I.plus}</button></div>
+      <label class="field switch tsw"><span><b>Set Rest Timers</b>Start a rest timer after every set of this exercise.</span><input type="checkbox" data-bind="restOn" ${it.restOn === false ? '' : 'checked'}></label>
+      <button class="btn primary" data-act="retargetClose">Save</button>`; }
+  if (m.type === 'exMore') return `<h2>${esc(exById(S.active.items[ui.cur].ex).name)}</h2>${opt('addSet', I.plus, 'Add set')}${opt('delEx', I.trash, 'Remove exercise', 'style="color:var(--red)"')}`;
   if (m.type === 'setMenu') return `<h2>Set Type</h2>${opt('setType', I.workout, 'Standard Set', `data-s="${m.s}" data-t="n"`)}${opt('setType', I.warm, 'Warm Up', `data-s="${m.s}" data-t="w"`)}${opt('delSet', I.trash, 'Delete Set', `data-s="${m.s}"`)}`;
   if (m.type === 'info') { const it = S.active.items[ui.cur], ex = exById(it.ex), rec = recordFor(ex.id), tab = ui.infoTab;
     const past = S.history.slice().reverse().map(h => ({ h, x: h.items.find(q => q.ex === ex.id) })).filter(p => p.x);
@@ -694,7 +706,14 @@ function viewSheet() {
       ${plan.length ? `<div class="card list">${plan.map(([w, r], i) => `<div><span>Warm-up ${i + 1}</span><b>${kg(w)} kg x ${r}</b></div>`).join('')}</div><button class="btn primary" data-act="warmup">Add warm-up sets</button>`
         : `<div class="card emptycard">${I.warm}<p>${ui.warmMode === 'smart' ? 'Smart warm-ups show here once the first set has a weight.' : 'Enter the weight of your first set to build a 50 / 70 / 85 % scheme.'}</p></div>`}
       <h2>More Options</h2>${mrow('warmEmpty', I.plus, 'Add empty warm-up set')}`; }
-  if (m.type === 'note') return `<h2>Note</h2><label class="field"><textarea data-bind="note" rows="3" placeholder="Add a note">${esc(S.active.items[ui.cur].note)}</textarea></label><button class="btn primary" data-act="close">Save</button>`;
+  if (m.type === 'note') { const k = ui.noteTab, pi = progItem();
+    const val = k === 'session' ? (S.active.note || '') : k === 'exercise' ? (S.active.items[ui.cur].note || '') : (pi ? pi.note || '' : '');
+    const label = { session: 'Session Note', exercise: 'Exercise Note', program: 'Program Note' }[k];
+    const hint = { session: 'Saved with this workout in your history.', exercise: 'Saved with this exercise in this workout.', program: pi ? 'Shown every time this exercise comes up in the program.' : 'This workout is not part of a program.' }[k];
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Note</h2><span></span></div>
+      <div class="tabsrow even intabs">${[['session', 'Session'], ['exercise', 'Exercise'], ['program', 'Program']].map(([t, l]) => `<button data-act="noteTab" data-t="${t}" aria-selected="${k === t}">${l}${t === 'session' ? '' : I.pin}</button>`).join('')}</div>
+      <label class="field"><span class="lrow"><b>${label}</b><em id="noteCount">${val.length}/300</em></span><textarea data-bind="note" maxlength="300" rows="3" placeholder="Note about this ${k}" ${k === 'program' && !pi ? 'disabled' : ''}>${esc(val)}</textarea></label>
+      <p class="muted">${hint}</p><button class="btn primary" data-act="close">Save</button>`; }
   if (m.type === 'pick') return `<h2>${m.for === 'swap' ? 'Swap Exercise' : 'Add Exercises'}</h2>
     <input type="search" placeholder="Search exercises" aria-label="Search exercises" data-bind="pickQ" value="${esc(m.q)}">
     <div class="pills" data-keep="pm">${['All', ...MUSCLES].map(x => `<button data-act="pickMuscle" data-m="${x}" aria-pressed="${(m.muscle || 'All') === x}">${x}</button>`).join('')}</div>
@@ -817,6 +836,9 @@ const actions = {
   warmMode(d) { ui.warmMode = d.v; },
   warmEmpty() { const it = curItem(); it.sets.unshift(newSet('w')); close(); },
   noteSheet() { ui.sheet = { type: 'note' }; },
+  noteTab(d) { ui.noteTab = d.t; },
+  addSetKeep() { const it = curItem(); it.sets.push(newSet()); retarget(it, true); },
+  trir(d) { const it = curItem(), q = it.sets[d.s]; q.trir = (T(it, q, 'rir') + 1) % 7; if (!q.done) q.rir = String(q.trir); },
   warmup() {
     const it = curItem(), first = it.sets.find(isWork), top = first && num(first.w);
     if (!top) return toast('Enter the weight of your first set first.');
@@ -866,7 +888,9 @@ document.addEventListener('click', e => {
 
 // Text fields save without a redraw, so the cursor stays put.
 const binds = {
-  note(el) { curItem().note = el.value; },
+  note(el) { const k = ui.noteTab, pi = progItem(); if (k === 'session') S.active.note = el.value; else if (k === 'exercise') curItem().note = el.value; else if (pi) pi.note = el.value; const c = document.getElementById('noteCount'); if (c) c.textContent = el.value.length + '/300'; },
+  tset(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(), q = it.sets[d.s]; q['t' + d.f] = Math.round(n); if (T(it, q, 'hi') < T(it, q, 'lo')) q.thi = T(it, q, 'lo'); },
+  restOn(el) { curItem().restOn = el.checked; },
   aitem(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(); it[d.f] = Math.round(n); if (it.hi < it.lo) it.hi = it.lo; },
   itemRest(el) { const n = num(el.value); if (n != null) curItem().rest = Math.max(0, Math.round(n)); },
   progName(el) { S.program.name = el.value; },
