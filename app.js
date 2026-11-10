@@ -91,6 +91,7 @@ const I = {
   route: svg('<circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 6h6a3 3 0 010 6h-4a3 3 0 000 6h6"/>'),
   scale: svg('<rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9.500 9h5"/><circle cx="12" cy="9" r=".5"/>'),
   globe: svg('<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.500 2.500 2.500 13.500 0 16M12 4c-2.500 2.500-2.500 13.500 0 16"/>'),
+  search: svg('<circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/>'),
   gym: svg('<rect x="5" y="4" width="14" height="16" rx="1"/><path d="M9 8h.01M12 8h.01M15 8h.01M9 12h.01M12 12h.01M15 12h.01M10 20v-4h4v4"/>'),
 };
 const EQUIP_GLYPH = {
@@ -751,10 +752,18 @@ function viewSheet() {
       <div class="tabsrow even intabs">${[['session', 'Session'], ['exercise', 'Exercise'], ['program', 'Program']].map(([t, l]) => `<button data-act="noteTab" data-t="${t}" aria-selected="${k === t}">${l}${t === 'session' ? '' : I.pin}</button>`).join('')}</div>
       <label class="field"><span class="lrow"><b>${label}</b><em id="noteCount">${val.length}/300</em></span><textarea data-bind="note" maxlength="300" rows="3" placeholder="Note about this ${k}" ${k === 'program' && !pi ? 'disabled' : ''}>${esc(val)}</textarea></label>
       <p class="muted">${hint}</p><button class="btn primary" data-act="close">Save</button>`; }
-  if (m.type === 'pick') return `<h2>${m.for === 'swap' ? 'Swap Exercise' : 'Add Exercises'}</h2>
-    <input type="search" placeholder="Search exercises" aria-label="Search exercises" data-bind="pickQ" value="${esc(m.q)}">
-    <div class="pills" data-keep="pm">${['All', ...MUSCLES].map(x => `<button data-act="pickMuscle" data-m="${x}" aria-pressed="${(m.muscle || 'All') === x}">${x}</button>`).join('')}</div>
-    <div id="pickList">${pickList()}</div><button class="btn" data-act="newExSheet">Create Custom Exercise</button>`;
+  if (m.type === 'pick') {
+    const EQ = ['All', ...Object.keys(EQUIP_GLYPH)];
+    return `<div class="ptop"><button class="hbtn" data-act="close" aria-label="Close">${I.x}</button><button class="hbtn" data-act="newExSheet" aria-label="Custom exercise">${I.plus}</button>
+        <div class="tray">${I.workout}<span>${m.added ? m.added + ' added' : m.for === 'swap' ? 'Pick a replacement' : ''}</span></div><button class="hbtn" data-act="close" aria-label="Done">${I.down}</button></div>
+      <div class="pills" data-keep="pf">
+        <button data-act="pickEquip">${I.gym}${m.equip && m.equip !== 'All' ? m.equip : 'Gym'} ${I.down}</button>
+        <button data-act="pickMuscle" data-m="All" aria-pressed="${(m.muscle || 'All') === 'All'}">All muscles</button>
+        ${m.muscle && m.muscle !== 'All' ? `<button aria-pressed="true" data-act="pickMuscle" data-m="All">${m.muscle} ${I.x}</button>` : ''}</div>
+      <div class="mtiles" data-keep="pm">${MUSCLES.map(x => `<button data-act="pickMuscle" data-m="${x}" aria-pressed="${m.muscle === x}">${miniBody(x)}<span>${x}</span></button>`).join('')}</div>
+      <div id="pickList">${pickList()}</div>
+      <div class="pbottom"><label class="search">${I.search}<input type="search" placeholder="Search for an exercise" aria-label="Search for an exercise" data-bind="pickQ" value="${esc(m.q)}"></label><button class="btn primary" data-act="close">Done</button></div>`;
+  }
   if (m.type === 'newEx') return `<h2>Custom Exercise</h2>
     <label class="field">Name<input id="nxName"></label>
     <label class="field">Muscle<select id="nxMuscle">${MUSCLES.map(x => `<option>${x}</option>`).join('')}</select></label>
@@ -789,10 +798,15 @@ function viewSheet() {
     <button class="btn primary" data-act="close">Done</button>`;
   return '';
 }
+const GROUPS = [['Free Weights', ['Barbell', 'Dumbbell']], ['Machines', ['Machine']], ['Cables', ['Cable']], ['Bodyweight', ['Bodyweight']]];
 function pickList() {
   const m = ui.sheet, q = (m.q || '').toLowerCase();
-  const list = allEx().filter(e => (!m.muscle || m.muscle === 'All' || e.muscle === m.muscle) && e.name.toLowerCase().includes(q));
-  return list.map(e => `<button class="pk" data-act="choose" data-ex="${esc(e.id)}">${thumb(e.id)}<div><b>${esc(e.name)}</b>${chipsEx(e.id)}</div>${I.plus}</button>`).join('') || '<p class="muted">No match. You can create it below.</p>';
+  const ok = e => (!m.muscle || m.muscle === 'All' || e.muscle === m.muscle || (e.sec || []).includes(m.muscle)) && (!m.equip || m.equip === 'All' || e.equip === m.equip) && e.name.toLowerCase().includes(q);
+  const list = allEx().map(fixEx).filter(ok).sort((x, y) => x.name.localeCompare(y.name));
+  const row = e => `<div class="pk">${thumb(e.id, 'tall')}<div><b>${esc(e.name)}</b><span>${e.muscle}${(e.sec || []).length ? ' • ' + e.sec.join(', ') : ''}</span></div><button class="hbtn" data-act="choose" data-ex="${esc(e.id)}" aria-label="Add ${esc(e.name)}">${I.plus}</button></div>`;
+  return GROUPS.map(([title, eqs]) => { const g = list.filter(e => eqs.includes(e.equip)); if (!g.length) return ''; const open = m.open === title || q || g.length <= 4;
+    return `<div class="h2row psec"><h3>${title}</h3>${g.length > 4 ? `<button class="link" data-act="pickOpen" data-g="${title}">${open && !q ? 'See Less' : `See ${g.length - 4} More`}</button>` : ''}</div>${(open ? g : g.slice(0, 4)).map(row).join('')}`; }).join('')
+    || '<p class="muted">No match. Use + at the top to create it.</p>';
 }
 
 // ---------- Actions ----------
@@ -899,8 +913,10 @@ const actions = {
   },
   delEx() { if (confirm('Remove this exercise from the workout?')) { S.active.items.splice(ui.cur, 1); ui.cur = Math.max(0, ui.cur - 1); ui.focus = null; } },
   restSkip() { stopRest(); },
-  pick(d) { ui.sheet = { type: 'pick', for: d.for, muscle: d.muscle || 'All', q: '' }; ui.focus = null; },
-  pickMuscle(d) { ui.sheet.muscle = d.m; },
+  pick(d) { ui.sheet = { type: 'pick', for: d.for, muscle: d.muscle || 'All', equip: 'All', q: '', added: 0 }; ui.focus = null; },
+  pickMuscle(d) { ui.sheet.muscle = ui.sheet.muscle === d.m ? 'All' : d.m; },
+  pickEquip() { const EQ = ['All', ...Object.keys(EQUIP_GLYPH)], m = ui.sheet; m.equip = EQ[(EQ.indexOf(m.equip || 'All') + 1) % EQ.length]; },
+  pickOpen(d) { ui.sheet.open = ui.sheet.open === d.g ? null : d.g; },
   newExSheet() { ui.sheet = { type: 'newEx', back: ui.sheet && ui.sheet.type === 'pick' ? ui.sheet : null }; },
   saveEx() {
     const name = document.getElementById('nxName').value.trim();
@@ -924,10 +940,10 @@ const actions = {
 };
 function choose(exId) {
   const m = ui.sheet, base = { ex: exId, sets: 3, lo: 8, hi: 12, rir: 2, rest: S.settings.rest };
-  if (m.for === 'day') { S.program.days[ui.day].items.push(base); toast('Added.'); return; }
-  if (m.for === 'session') { S.active.items.push(newItem(base)); ui.cur = S.active.items.length - 1; }
-  else if (m.for === 'swap') { const it = curItem(); it.ex = exId; retarget(it, true); }
-  close();
+  if (m.for === 'swap') { const it = curItem(); it.ex = exId; retarget(it, true); close(); return; }
+  if (m.for === 'day') S.program.days[ui.day].items.push(base);
+  else if (m.for === 'session') { S.active.items.push(newItem(base)); ui.cur = S.active.items.length - 1; }
+  m.added = (m.added || 0) + 1; toast('Added ' + exById(exId).name + '.');
 }
 
 document.addEventListener('click', e => {
