@@ -431,3 +431,21 @@ main[class^="screen-"] { padding-bottom: calc(env(safe-area-inset-bottom) + 24px
 .tsw input[type=checkbox]::after, .switch input[type=checkbox]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 13px; background: #fff; transition: transform .15s; }
 .tsw input[type=checkbox]:checked, .switch input[type=checkbox]:checked { background: var(--ink); }
 .tsw input[type=checkbox]:checked::after, .switch input[type=checkbox]:checked::after { transform: translateX(20px); background: var(--top); }
+
+/* ---- Tema elegido a mano, peso corporal y More real ---- */
+:root[data-theme=dark] { --bg: #161616; --top: #1e1e1e; --card: #212121; --fill: #333333; --line: #3a3a3a; --ink: #ffffff; --mut: #b4b4b4; --mid: #5a5a5a; --prim: #ffffff; --prim-ink: #111111; --sil: #383838; --sil-2: #4c4c4c; color-scheme: dark; }
+:root[data-theme=light] { --bg: #f4f4f4; --top: #ffffff; --card: #ffffff; --fill: #e8e8e8; --line: #dedede; --ink: #111111; --mut: #5f5f5f; --mid: #a9a9a9; --prim: #000000; --prim-ink: #ffffff; --sil: #dcdcdc; --sil-2: #eeeeee; color-scheme: light; }
+:root[data-theme=light] .ring .track { stroke: #d6d6d6; } :root[data-theme=light] .seg.mini { background: #dcdcdc; }
+@media (prefers-color-scheme: light) { :root:not([data-theme=dark]) .ring .track { stroke: #d6d6d6; } :root:not([data-theme=dark]) .seg.mini { background: #dcdcdc; } }
+.spark.green polyline, .spark.green circle { stroke: #4caf78; }
+.dotgrid i.on.g { background: #4caf78; }
+.flabel { color: var(--ink); font-weight: 500; font-size: 16px; }
+.unitin { position: relative; display: block; } .unitin em { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font-style: normal; color: var(--mut); }
+.mrow .val, .mrow > b { font-weight: 400; color: var(--mut); font-size: 16px; }
+.themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.ttile { height: 84px; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; justify-content: space-between; border: 2px solid transparent; }
+.ttile b { font-size: 20px; font-weight: 600; } .ttile span { display: flex; gap: 4px; } .ttile i { width: 9px; height: 9px; border-radius: 5px; }
+.ttile i:nth-child(1) { background: #276ef1; } .ttile i:nth-child(2) { background: #f58a66; } .ttile i:nth-child(3) { background: #f8ab00; } .ttile i:nth-child(4) { background: #0f9d58; }
+.t-light { background: #fff; color: #111; } .t-dark { background: #111; color: #fff; } .t-system { background: linear-gradient(105deg, #fff 50%, #111 50%); color: #111; } .t-system span { justify-content: flex-end; }
+.ttile[aria-pressed=true] { border-color: var(--blue); }
+.muted.center { text-align: center; padding: 12px 0; }

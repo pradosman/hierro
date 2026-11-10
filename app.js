@@ -8,8 +8,8 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 function freshState() {
   return {
     v: 2,
-    settings: { bar: 20, plates: [25, 20, 15, 10, 5, 2.5, 1.25], rest: 120, sound: true },
-    custom: [], program: null, nextDay: 0, active: null, restEnd: null, restTotal: 0, history: [],
+    settings: { bar: 20, plates: [25, 20, 15, 10, 5, 2.5, 1.25], rest: 120, sound: true, theme: 'system' },
+    custom: [], weights: [], program: null, nextDay: 0, active: null, restEnd: null, restTotal: 0, history: [],
   };
 }
 function load() {
@@ -17,6 +17,8 @@ function load() {
   return freshState();
 }
 let S = load();
+const applyTheme = () => { const t = S.settings.theme; if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; };
+applyTheme();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Could not save. The phone is out of space.'); } };
 
 const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, cal: false, dashPage: 0, recMode: '1rm', infoTab: 'inst', warmMode: 'smart', noteTab: 'session', range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
@@ -87,6 +89,8 @@ const I = {
   hist: svg('<rect x="5" y="4" width="13" height="15" rx="2"/><path d="M8.500 8.500h6M8.500 12h3"/><circle cx="16.500" cy="16.500" r="4" fill="var(--fill)"/><path d="M16.500 14.500v2l1.500 1"/>'),
   enter: svg('<path d="M4 6v12M8 12h12M15 7l5 5-5 5"/>'),
   route: svg('<circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 6h6a3 3 0 010 6h-4a3 3 0 000 6h6"/>'),
+  scale: svg('<rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9.500 9h5"/><circle cx="12" cy="9" r=".5"/>'),
+  globe: svg('<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.500 2.500 2.500 13.500 0 16M12 4c-2.500 2.500-2.500 13.500 0 16"/>'),
   gym: svg('<rect x="5" y="4" width="14" height="16" rx="1"/><path d="M9 8h.01M12 8h.01M15 8h.01M9 12h.01M12 12h.01M15 12h.01M10 20v-4h4v4"/>'),
 };
 const EQUIP_GLYPH = {
@@ -333,6 +337,15 @@ function recentRecords() {
   const rows = Object.entries(best).slice(-7), mx = Math.max(1, ...rows.map(r => r[1]));
   return rows.map(([id, v]) => ({ name: exById(id).name, pct: Math.max(4, (v / mx) * 100), label: ui.recMode === 'reps' ? `${v} reps` : `${kg(Math.round(v * 10) / 10)} kg` }));
 }
+// Scale weight: raw entries and a smoothed trend (each new entry moves the trend 25 % of the way).
+const weightsSorted = () => (S.weights || []).slice().sort((a, b) => a.t - b.t);
+function weightTrend() { let tr = null; return weightsSorted().map(w => { tr = tr == null ? w.kg : tr + (w.kg - tr) * 0.25; return { t: w.t, kg: Math.round(tr * 10) / 10 }; }); }
+function lineSvg(vals, cls) {
+  if (vals.length < 2) return vals.length ? `<svg class="spark ${cls}" viewBox="0 0 140 42"><circle cx="134" cy="21" r="3"/></svg>` : '<div class="spark"></div>';
+  const lo = Math.min(...vals), hi = Math.max(...vals), sp = hi - lo || 1;
+  const pts = vals.map((v, i) => [6 + i * (128 / (vals.length - 1)), hi === lo ? 21 : 34 - ((v - lo) / sp) * 26]);
+  return `<svg class="spark ${cls}" viewBox="0 0 140 42"><polyline points="${pts.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ')}"/>${pts.map(p => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3"/>`).join('')}</svg>`;
+}
 const cycleNo = () => (S.program && S.program.days.length ? Math.floor(S.history.filter(h => h.prog).length / S.program.days.length) + 1 : 1);
 function doneThisCycle(dayIdx) {
   const n = S.program.days.length, hs = S.history.filter(h => h.prog);
@@ -373,15 +386,12 @@ function viewDash() {
   const last = S.history.slice(-7);
   const setsArr = last.map(h => sessionStats(h).sets), volArr = last.map(h => sessionStats(h).vol);
   const mx = Math.max(1, ...setsArr);
-  const line = () => {
-    if (volArr.length < 2) return '<div class="spark"></div>';
-    const lo = Math.min(...volArr), hi = Math.max(...volArr), sp = hi - lo || 1;
-    const pts = volArr.map((v, i) => [6 + i * (128 / (volArr.length - 1)), 34 - ((v - lo) / sp) * 26]);
-    return `<svg class="spark" viewBox="0 0 140 42"><polyline points="${pts.map(p => p.join(',')).join(' ')}"/>${pts.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="3"/>`).join('')}</svg>`;
-  };
   const today = new Date().setHours(0, 0, 0, 0), ws = weekStart(Date.now());
   const grid = Array.from({ length: 30 }, (_, i) => { const t = today - (29 - i) * DAY; return S.history.some(h => h.start >= t && h.start < t + DAY); });
   const thisWeek = new Set(S.history.filter(h => h.start >= ws).map(h => new Date(h.start).toDateString())).size;
+  const trend = weightTrend(), ws7 = weightsSorted().slice(-7);
+  const wgrid = Array.from({ length: 30 }, (_, i) => { const t = today - (29 - i) * DAY; return (S.weights || []).some(w => w.t >= t && w.t < t + DAY); });
+  const wWeek = new Set((S.weights || []).filter(w => w.t >= ws).map(w => new Date(w.t).toDateString())).size;
   const m7 = muscleSets(Date.now() - 7 * DAY, Date.now() + DAY);
   const top2 = Object.entries(m7).sort((a, b) => b[1] - a[1]).slice(0, 2);
   return `${hero('Dashboard', hbtn('tab', I.sliders, 'Settings', 'data-tab="more"'))}
@@ -408,20 +418,27 @@ ${ui.dashPage ? `<section class="top dashtop">
           <div class="bars">${setsArr.map(v => `<i style="height:${Math.max(8, (v / mx) * 100)}%"></i>`).join('')}</div>
           <p><b>${setsArr.length ? setsArr[setsArr.length - 1] : 0}</b> sets ${I.right}</p>
         </button>
-        <button class="card tile" data-act="open" data-screen="analytics" data-metric="vol">
-          <b>Volume</b><span>Last 7 Workouts</span>
-          ${line()}
-          <p><b>${volArr.length ? volArr[volArr.length - 1].toLocaleString('en-US') : '--'}</b> kg ${I.right}</p>
+        <button class="card tile" data-act="sheet" data-type="weight">
+          <b>Weight Trend</b><span>Last 7 Days</span>
+          ${lineSvg(trend.slice(-7).map(w => w.kg), '')}
+          <p><b>${trend.length ? trend[trend.length - 1].kg.toFixed(1) : '--'}</b> kg ${I.right}</p>
         </button>
       </div>
       <h2>Habits</h2>
       <div class="two">
+        <button class="card tile" data-act="sheet" data-type="weight">
+          <b>Weigh-In</b><span>Last 30 Days</span>
+          <div class="dotgrid">${wgrid.map(on => `<i class="${on ? 'on g' : ''}"></i>`).join('')}</div>
+          <p><b>${wWeek}/7</b> this week ${I.right}</p>
+        </button>
         <button class="card tile" data-act="open" data-screen="history">
           <b>Workouts</b><span>Last 30 Days</span>
           <div class="dotgrid">${grid.map(on => `<i class="${on ? 'on' : ''}"></i>`).join('')}</div>
           <p><b>${thisWeek}</b> this week ${I.right}</p>
         </button>
       </div>
+      <div class="h2row"><h2>Body Metrics</h2><button class="link" data-act="sheet" data-type="weightList">See All</button></div>
+      <div class="two"><button class="card tile" data-act="sheet" data-type="weight"><b>Scale Weight</b><span>Last 7 Entries</span>${lineSvg(ws7.map(w => w.kg), 'green')}<p><b>${ws7.length ? ws7[ws7.length - 1].kg.toFixed(1) : '--'}</b> kg ${I.right}</p></button></div>
       <div class="h2row"><h2>Muscle Groups</h2><button class="link" data-act="tab" data-tab="levels">See All</button></div>
       <div class="two">${top2.map(([m, v]) => `<button class="card tile" data-act="tab" data-tab="levels"><b>${m}</b><span>Last 7 Days</span><div class="spark"></div><p><b>${v ? kg(v) : '--'}</b> sets ${I.right}</p></button>`).join('')}</div>
     </section>`;
@@ -657,17 +674,22 @@ function viewHistory() {
 
 const mrow = (act, icon, label, extra = '', right = I.right) => `<button class="mrow" data-act="${act}" ${extra}>${icon}<span>${label}</span>${right}</button>`;
 function viewMore() {
-  const n = S.history.length;
+  const n = S.history.length, th = S.settings.theme || 'system';
+  const tile = (t, label) => `<button class="ttile t-${t}" data-act="theme" data-t="${t}" aria-pressed="${th === t}" aria-label="${label} theme"><b>Aa</b><span><i></i><i></i><i></i><i></i></span></button>`;
   return `${hero('More')}
     <div class="top profile"><span class="avatar wide">H</span><div><b>Hierro</b><span>${n} workout${n === 1 ? '' : 's'} logged on this phone</span></div></div>
     <section class="pad">
       <h2>General</h2>
-      <div class="card rows">${mrow('sheet', I.gym, 'Gym Equipment', 'data-type="equip"')}${mrow('sheet', I.timer, 'Rest Timer', 'data-type="rest"')}${mrow('open', I.cal, 'Workout History', 'data-screen="history"')}</div>
+      <div class="card rows">${mrow('sheet', I.scale, 'Units', 'data-type="units"')}${mrow('sheet', I.timer, 'Rest Timer', 'data-type="rest"')}${mrow('sheet', I.globe, 'Language', 'data-type="about"', '<b class="val">English</b>')}</div>
       <h2>Feature Settings</h2>
-      <div class="card rows">${mrow('tab', I.dash, 'Dashboard', 'data-tab="dash"')}${mrow('tab', I.workout, 'Workout', 'data-tab="workout"')}${mrow('tab', I.levels, 'Levels', 'data-tab="levels"')}</div>
-      <h2>Data</h2>
-      <div class="card rows">${mrow('export', I.down, 'Export Data')}<label class="mrow">${I.up}<span>Import Data</span>${I.right}<input type="file" accept="application/json,.json" data-bind="import" hidden></label>${mrow('wipe', I.trash, 'Delete All Data')}</div>
-      <p class="muted">Your data lives only on this phone. Export a copy from time to time.</p>
+      <div class="card rows">${mrow('tab', I.dash, 'Dashboard', 'data-tab="dash"')}${mrow('tab', I.workout, 'Workout', 'data-tab="workout"')}${mrow('plusSheet', I.plus, 'Shortcuts')}${mrow('sheet', I.scale, 'Weight Trend', 'data-type="weightList"')}${mrow('sheet', I.info, 'Exercises', 'data-type="exlib"')}${mrow('sheet', I.gym, 'Gym Profiles', 'data-type="equip"')}</div>
+      <h2>Theme</h2>
+      <div class="themes">${tile('light', 'Light')}${tile('dark', 'Dark')}${tile('system', 'System')}</div>
+      <h2>Data Management</h2>
+      <div class="card rows">${mrow('export', I.down, 'Data Export')}<label class="mrow">${I.up}<span>Data Import</span>${I.right}<input type="file" accept="application/json,.json" data-bind="import" hidden></label>${mrow('wipe', I.trash, 'Delete All Data')}</div>
+      <h2>Other</h2>
+      <div class="card rows">${mrow('open', I.cal, 'Workout History', 'data-screen="history"')}${mrow('sheet', I.info, 'About', 'data-type="about"')}</div>
+      <p class="muted center">Version 1.0 · Data lives only on this phone</p>
     </section>`;
 }
 
@@ -680,7 +702,7 @@ function viewSheet() {
     const sc = (act, icon, label, extra = '') => `<button data-act="${act}" ${extra}><i>${icon}</i>${label}</button>`;
     const nd = nextIdx >= 0 ? S.program.days[nextIdx] : null;
     return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Shortcuts</h2><button class="ic" data-act="tab" data-tab="more" aria-label="Settings">${I.sliders}</button></div>
-      <div class="shortcuts">${sc('open', I.hist, 'History', 'data-screen="history"')}${sc('tab', I.levels, 'Levels', 'data-tab="levels"')}${sc('sheet', I.gym, 'Gym', 'data-type="equip"')}${sc('sheet', I.timer, 'Timer', 'data-type="rest"')}</div>
+      <div class="shortcuts">${sc('sheet', I.scale, 'Weight', 'data-type="weight"')}${sc('tab', I.levels, 'Levels', 'data-tab="levels"')}${sc('sheet', I.gym, 'Gym', 'data-type="equip"')}${sc('open', I.hist, 'History', 'data-screen="history"')}</div>
       ${S.active ? `<button class="upnext" data-act="resume"><div><b>In Progress • ${esc(S.active.dayName)}</b><p>Tap to resume your workout</p></div>${I.right}</button>`
         : nd ? `<button class="upnext" data-act="daySheet" data-i="${nextIdx}"><div><b>Up Next • ${esc(nd.name)}</b><p>${esc(nd.items.map(it => exById(it.ex).name).join(', '))}</p>${chips(nd.items.map(it => it.ex))}</div>${I.right}</button>` : ''}
       <div class="srows">${mrow('startFree', I.enter, 'Empty Workout')}${mrow('emptyProgram', I.route, 'New Program')}${S.program ? mrow('addDay', I.workout, 'New Workout') : ''}${mrow('newExSheet', I.plus, 'Custom Exercise')}</div>`;
@@ -746,6 +768,17 @@ function viewSheet() {
   if (m.type === 'reorder') return `<h2>Re-order</h2>${S.program.days[ui.day].items.map((it, i) => `<div class="opt"><span class="grow">${esc(exById(it.ex).name)}</span><button class="ic" data-act="moveKeep" data-i="${i}" data-dir="-1" aria-label="Move up">${I.up}</button><button class="ic" data-act="moveKeep" data-i="${i}" data-dir="1" aria-label="Move down">${I.down}</button></div>`).join('')}<button class="btn primary" data-act="close">Done</button>`;
   if (m.type === 'progMenu') return `<h2>Program</h2><label class="field">Name<input data-bind="progName" value="${esc(S.program.name)}"></label>${opt('editProgram', I.edit, 'Edit Program')}${opt('addDay', I.plus, 'Add Workout')}${opt('delProgram', I.trash, 'Remove Program')}<button class="btn primary" data-act="close">Done</button>`;
   if (m.type === 'rename') return `<h2>Rename</h2><label class="field">Workout name<input data-bind="dayName" value="${esc(S.program.days[ui.day].name)}"></label><button class="btn primary" data-act="close">Done</button>`;
+  if (m.type === 'weight') { const today0 = new Date().setHours(0, 0, 0, 0), cur = (S.weights || []).find(w => w.t >= today0 && w.t < today0 + DAY);
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>${new Date().toLocaleDateString('en-US')}<small>Scale Weight</small></h2><button class="ic" data-act="weightDel" aria-label="Delete today's entry">${I.trash}</button></div>
+      <label class="field"><b class="flabel">Weight</b><span class="unitin"><input id="wIn" inputmode="decimal" value="${cur ? cur.kg : ''}" placeholder="0.0"><em>kg</em></span></label>
+      <button class="btn primary" data-act="weightSave">Save</button>`; }
+  if (m.type === 'weightList') { const ws = weightsSorted().reverse();
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Scale Weight</h2><button class="ic" data-act="sheet" data-type="weight" aria-label="Add entry">${I.plus}</button></div>
+      ${ws.length ? `<div class="card list">${ws.map(w => `<div><span>${new Date(w.t).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span><b>${w.kg.toFixed(1)} kg</b></div>`).join('')}</div>` : `<div class="card emptycard">${I.scale}<p>No weigh-ins yet. Add your first one with the + button.</p></div>`}`; }
+  if (m.type === 'units') return `<h2>Units</h2><div class="card rows"><div class="mrow">${I.scale}<span>Weight</span><b>kg</b></div><div class="mrow">${I.timer}<span>Rest</span><b>seconds</b></div></div><button class="btn primary" data-act="close">Done</button>`;
+  if (m.type === 'about') return `<h2>About</h2><p class="muted">Hierro is a personal strength training log. Everything you enter stays on this phone.</p><div class="card list"><div><span>Workouts logged</span><b>${S.history.length}</b></div><div><span>Exercises</span><b>${allEx().length}</b></div></div><button class="btn primary" data-act="close">Done</button>`;
+  if (m.type === 'exlib') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Exercises</h2><button class="ic" data-act="newExSheet" aria-label="Custom exercise">${I.plus}</button></div>
+    <div id="pickList">${allEx().map(e => `<div class="pk">${thumb(e.id)}<div><b>${esc(e.name)}</b>${chipsEx(e.id)}</div></div>`).join('')}</div>`;
   if (m.type === 'equip') return `<h2>Gym Equipment</h2>
     <label class="field">Bar weight (kg)<input inputmode="decimal" data-bind="setting" data-f="bar" value="${kg(S.settings.bar)}"></label>
     <label class="field">Plates you have (kg)<input data-bind="setting" data-f="plates" value="${S.settings.plates.map(kg).join(' ')}"></label>
@@ -779,6 +812,9 @@ const actions = {
   range(d) { ui.range = d.r; },
   tmMode(d) { ui.tmCycle = !!d.v; },
   flip() { ui.back = !ui.back; },
+  weightSave() { const v = num(document.getElementById('wIn').value); if (!v || v <= 0) return toast('Enter your weight.'); const t0 = new Date().setHours(0, 0, 0, 0); S.weights = (S.weights || []).filter(w => !(w.t >= t0 && w.t < t0 + DAY)); S.weights.push({ t: Date.now(), kg: Math.round(v * 10) / 10 }); close(); toast('Weight saved.'); },
+  weightDel() { const t0 = new Date().setHours(0, 0, 0, 0); S.weights = (S.weights || []).filter(w => !(w.t >= t0 && w.t < t0 + DAY)); close(); },
+  theme(d) { S.settings.theme = d.t; applyTheme(); },
   plusSheet() { ui.sheet = { type: 'plus' }; },
   toggleCal() { ui.cal = !ui.cal; },
   toggleProg() { ui.progOpen = !ui.progOpen; },
