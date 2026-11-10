@@ -91,41 +91,47 @@ const thumb = (exId, cls = '') => {
 };
 
 // ---------- Figura del cuerpo ----------
-// Media figura (lado izquierdo). La otra mitad es un espejo.
-const BASE = '<ellipse cx="50" cy="14" rx="8" ry="10"/><rect x="46" y="22" width="8" height="9"/>';
-const HALF_BASE = '<path d="M50 30 Q40 29 34 32 Q26 33 24 44 L21 66 L15 92 Q11 98 13 104 L18 104 Q21 100 21 94 L28 69 L33 52 L35 78 L33 96 L37 142 L39 188 L33 196 L46 197 L46 189 L47 142 L50 100 Z"/>';
+// Dibujo propio. Media figura (lado izquierdo); la otra mitad es un espejo.
+const rr = (x, y, w, h, r = 2.5) => `M${x + r} ${y} h${w - 2 * r} a${r} ${r} 0 0 1 ${r} ${r} v${h - 2 * r} a${r} ${r} 0 0 1 -${r} ${r} h-${w - 2 * r} a${r} ${r} 0 0 1 -${r} -${r} v-${h - 2 * r} a${r} ${r} 0 0 1 ${r} -${r} z`;
+const HEAD = '<ellipse cx="100" cy="30" rx="17" ry="22"/>';
+const HALF_BASE = '<path d="M100 44 L91 44 L90 60 Q78 66 62 68 Q46 71 42 88 L38 128 Q36 150 30 172 L22 206 Q15 214 12 225 L14 237 Q18 241 22 236 L24 245 Q28 247 30 240 L34 222 L40 206 Q48 180 52 156 L56 134 Q58 152 60 168 Q57 190 58 210 Q56 250 62 290 Q64 310 64 326 Q62 350 66 378 L68 396 Q62 404 60 411 L85 411 Q87 400 84 392 Q88 360 88 330 Q90 312 90 296 Q96 250 100 224 Z"/>';
+const DELT = 'M60 71 Q47 73 45 89 Q44 98 47 105 Q57 99 62 85 Q65 77 60 71 Z';
+const ARM = 'M44 109 Q50 104 55.500 109 L54 137 Q50 147 44.500 143 Q40 126 44 109 Z';
+const FOREARM = 'M40 150 Q47 152 51.500 148 L42 198 Q36 204 30.500 200 Q34 175 40 150 Z';
 const PARTS = {
   front: {
-    Hombro: ['M34 32.500 Q27 33.500 25 43 L31 45.500 L36 36 Z'],
-    Pecho: ['M37.500 35.500 L49 35 L49 50.500 Q42 54 35.500 49.500 Z'],
-    'Bíceps': ['M24.500 45 L31 47.500 L28.500 66 L22 64 Z'],
-    Abdomen: ['M41.500 55 h7.500 v7 h-7.500 z', 'M41.500 63.500 h7.500 v7 h-7.500 z', 'M42 72 h7 v9 l-5 -2 z'],
-    'Cuádriceps': ['M36 97 L48.500 97 L46.500 139 L38.500 139 Z'],
-    Gemelo: ['M39.500 146 L46 146 L45 180 L40.500 180 Z'],
-    _: ['M21.500 68 L27.500 70 L21 92 L16.500 91 Z', 'M36 52 L40 55 L41 80 L36 78 Z'],
+    _: ['M91 57 Q84 63 73 67 L90 68 Z', FOREARM, 'M95.500 226 Q99 223 99 229 L96 262 Q94 245 95.500 226 Z', 'M79 320 Q84 318 85 324 Q86 350 81 380 L77 380 Z'],
+    Hombro: [DELT],
+    Pecho: ['M68 72 Q66 72 65 78 Q62 92 68 102 Q76 110 88 108 Q97 106 97.500 100 L97.500 75 Q97.500 72 94 72 Z'],
+    'Bíceps': [ARM],
+    Abdomen: [rr(85, 112, 12.500, 11), rr(85, 125.500, 12.500, 11), rr(85, 139, 12.500, 11), 'M85 153.500 h12.500 v26 q-9 -3 -12.500 -13 z', 'M66 110 Q74 114 81 114 L82 170 Q72 166 66 150 Z'],
+    'Cuádriceps': ['M61 215 Q69 208 76 212 L76 298 Q70 301 67 296 Q58 256 61 215 Z', 'M79 212 Q88 210 93 219 Q94 260 87 296 Q83 300 79 298 Z'],
+    Gemelo: ['M66 319 Q71 314 76 318 L75 380 L70 380 Q64 348 66 319 Z'],
   },
   back: {
-    Hombro: ['M34 32.500 Q27 33.500 25 43 L31 45.500 L36 36 Z'],
-    Espalda: ['M44 27 L49.500 27 L49.500 44 L37 35 Z', 'M36 38 L49.500 46.500 L49.500 76 L40 73 Z'],
-    'Tríceps': ['M24.500 45 L31 47.500 L28.500 66 L22 64 Z'],
-    'Glúteo': ['M36.500 78 L49.500 78 L49.500 97 L35 97 Q33.500 87 36.500 78 Z'],
-    Isquios: ['M36 99.500 L48.500 99.500 L46.500 139 L38.500 139 Z'],
-    Gemelo: ['M38.500 144 L47 144 L45.500 172 L40.500 172 Z'],
-    _: ['M21.500 68 L27.500 70 L21 92 L16.500 91 Z'],
+    _: [FOREARM],
+    Espalda: ['M92 54 L97.500 54 L97.500 102 L72 72 Q85 66 92 54 Z', 'M66 82 L95 108 L95 150 Q80 146 70 132 Q63 108 66 82 Z', 'M84 155 L97.500 153 L97.500 176 L84 174 Z'],
+    Hombro: [DELT],
+    'Tríceps': [ARM],
+    'Glúteo': ['M66 181 Q82 175 97.500 181 L97.500 214 Q84 222 68 214 Q62 198 66 181 Z'],
+    Isquios: ['M64 223 Q78 227 93 221 Q94 262 86 296 Q76 300 68 296 Q60 258 64 223 Z'],
+    Gemelo: ['M66 317 Q76 309 85 319 Q88 345 80 367 L72 367 Q62 345 66 317 Z'],
   },
 };
-function body(levels, side, cls = '') {
+function body(levels, side, cls = '', box = '0 0 200 420') {
   const half = Object.entries(PARTS[side]).map(([m, paths]) => {
     const lv = m === '_' ? 0 : (levels[m] || 0);
     const style = lv > 0 ? `class="lit" style="fill-opacity:${(0.35 + 0.65 * Math.min(1, lv)).toFixed(2)}"` : 'class="dim"';
     return paths.map(d => `<path d="${d}" ${style}/>`).join('');
   }).join('');
-  return `<svg class="body ${cls}" viewBox="8 2 84 198" role="img" aria-label="Figura ${side === 'front' ? 'de frente' : 'de espalda'}">
-    <g class="sil">${BASE}${HALF_BASE}<g transform="translate(100 0) scale(-1 1)">${HALF_BASE}</g></g>
-    <g class="mus">${half}<g transform="translate(100 0) scale(-1 1)">${half}</g></g></svg>`;
+  return `<svg class="body ${cls}" viewBox="${box}" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Figura ${side === 'front' ? 'de frente' : 'de espalda'}">
+    <g class="sil">${HEAD}${HALF_BASE}<g transform="translate(200 0) scale(-1 1)">${HALF_BASE}</g></g>
+    <g class="mus">${half}<g transform="translate(200 0) scale(-1 1)">${half}</g></g></svg>`;
 }
 const FRONT = ['Pecho', 'Hombro', 'Bíceps', 'Abdomen', 'Cuádriceps'];
-const miniBody = m => body({ [m]: 1 }, FRONT.includes(m) ? 'front' : 'back', 'mini');
+// Recorte de la figura alrededor de cada músculo, para las tarjetas pequeñas.
+const CROP = { Pecho: '55 52 90 76', Hombro: '22 40 156 190', 'Bíceps': '22 62 156 190', 'Tríceps': '22 62 156 190', Abdomen: '55 98 90 92', Espalda: '45 44 110 140', 'Cuádriceps': '45 196 110 116', Isquios: '45 204 110 108', 'Glúteo': '50 160 100 76', Gemelo: '45 296 110 96' };
+const miniBody = m => body({ [m]: 1 }, FRONT.includes(m) ? 'front' : 'back', 'mini', CROP[m]);
 
 // ---------- Regla de progreso ----------
 function lastSets(exId) {

@@ -1,4 +1,4 @@
-const CACHE = 'hierro-v2';
+const CACHE = 'hierro-v3';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'data.js', 'icon.svg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'fonts/dm-sans.woff2', 'fonts/krona-one.woff2'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
