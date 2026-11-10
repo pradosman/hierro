@@ -270,3 +270,61 @@ main[class^="screen-"] { padding-bottom: calc(env(safe-area-inset-bottom) + 24px
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
 .hscroll.recs { padding: 4px 16px; }
+
+/* ---- Ajustes tras ver la app real en el iPhone ---- */
+.hero { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: calc(env(safe-area-inset-top) + 18px) 16px 6px; }
+.hero h1 { font-size: 21px; line-height: 1; letter-spacing: -.01em; }
+.hbtns { display: flex; gap: 10px; }
+.hbtn { width: 40px; height: 40px; border-radius: 20px; background: var(--fill); display: grid; place-items: center; }
+.hbtn svg { width: 20px; height: 20px; }
+.dashtop { padding: 8px 16px 24px !important; }
+.dashtop h2 { margin-bottom: 4px; }
+.ring circle { stroke-width: 4.500; }
+.ring .track { stroke: #4a4a4a; }
+.ring b { font-size: 25px; font-weight: 700; line-height: 1.05; }
+.ring.big b { font-size: 25px; }
+.ring-labels b { font-size: 18px; }
+.pager { display: flex; justify-content: center; gap: 8px; padding: 18px 0 2px; }
+.pager i { width: 6px; height: 6px; border-radius: 3px; background: var(--mid); } .pager i.on { background: var(--ink); }
+.pad > h2 { margin-top: 18px; }
+.dotgrid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; margin: 12px 0 10px; }
+.dotgrid i { aspect-ratio: 1; border-radius: 2px; background: var(--fill); } .dotgrid i.on { background: var(--coral); }
+.tile .spark:empty, div.spark { height: 46px; }
+.week { padding: 2px 16px 18px; }
+.daypill { width: 40px; height: 60px; gap: 1px; }
+.daypill b { font-size: 15px; font-weight: 400; } .daypill span { font-size: 12px; }
+.daypill.today::after { bottom: 5px; }
+.sq.amber { background: var(--amber); color: #3a2a00; } .sq.green { background: var(--green); }
+.sq svg { width: 24px; height: 24px; }
+.wrow.dimmed b, .wrow.dimmed p, .wrow.dimmed .chips { opacity: .38; }
+.wrow.dimmed .box.on { background: #6b6b6b; border-color: #6b6b6b; color: var(--top); }
+.card.empty { padding: 16px; }
+.chips span { border: 1px solid transparent; }
+.chips .o { background: transparent; border-color: var(--mut); }
+.h2row { align-items: center; } .h2row.first { margin-top: 0; }
+.seg.mini { margin: 0; border-radius: 8px; padding: 3px; background: #101010; }
+.seg.mini button { height: 30px; padding: 0 16px; border-radius: 6px; font-size: 15px; }
+.mcard { border-radius: 12px; height: 86px; padding-right: 16px; min-width: 198px; }
+.body.mini { width: 86px; height: 86px; background: transparent; }
+.thumb.tall { width: 40px; height: 52px; }
+.pex { border-top: 2px solid var(--line); padding: 18px 16px; }
+.wk { width: 100%; border-radius: 12px; padding: 14px 16px; }
+.wk > b { font-size: 17px; }
+.wk span { font-size: 16px; } .wk span .rir { margin-left: auto; }
+.wk.note { flex-direction: row; justify-content: space-between; align-items: center; }
+.wk.note span { color: var(--mut); }
+.rows { overflow: hidden; }
+.lvl { height: 88px; padding: 0 16px 0 8px; position: relative; }
+.lvl .body.mini { width: 76px; height: 76px; }
+.lvl + .lvl::before, .mrow + .mrow::before { content: ""; position: absolute; top: 0; right: 0; left: 96px; border-top: 1px solid var(--line); }
+.mrow { position: relative; display: flex; align-items: center; gap: 22px; width: 100%; min-height: 64px; padding: 0 16px 0 20px; font-size: 17px; }
+.mrow + .mrow::before { left: 64px; }
+.mrow span { flex: 1; } .mrow > svg:last-of-type { color: var(--mid); width: 20px; height: 20px; }
+.profile { display: flex; align-items: center; gap: 16px; padding: 10px 16px 22px; }
+.avatar { width: 64px; height: 64px; border-radius: 32px; background: var(--ink); color: var(--top); display: grid; place-items: center; font-size: 20px; }
+.profile b { display: block; font-size: 18px; font-weight: 500; } .profile span:not(.avatar) { color: var(--mut); font-size: 15px; }
+.tab-levels { background: var(--bg); }
+.figure { padding-top: 0; }
+.figure > .body { margin-top: 8px; width: 60%; }
+.switch.field { padding: 4px 0; }
+#tabs button[data-tab] span { font-size: 11px; }
