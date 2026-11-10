@@ -19,7 +19,7 @@ function load() {
 let S = load();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Could not save. The phone is out of space.'); } };
 
-const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'prev', range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
+const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
 
 // ---------- Ayudas ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -77,6 +77,11 @@ const I = {
   flip: svg('<path d="M5 9a7 7 0 0112-3l2 2M19 15a7 7 0 01-12 3l-2-2M19 4v4h-4M5 20v-4h4"/>'),
   rocket: svg('<path d="M12 3c3 2.500 4.500 6 4.500 9.500L15 16H9l-1.500-3.500C7.500 9 9 5.500 12 3z"/><path d="M10 19l2 2 2-2"/>'),
   puzzle: svg('<path d="M9 4h3a2 2 0 114 0h3v5a2 2 0 100 4v6h-5a2 2 0 10-4 0H5v-5a2 2 0 110-4V4h4z"/>', true),
+  pin: svg('<path d="M8 3h8l-1 6 3 4H6l3-4-1-6zM12 13v8"/>', true),
+  next: svg('<path d="M5 12h14M13 6l6 6-6 6"/>'),
+  target: svg('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.500"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'),
+  plates: svg('<path d="M4 12h16M8 7v10M16 7v10M5.500 9.500v5M18.500 9.500v5"/>'),
+  minus: svg('<path d="M5 12h14"/>'),
   gym: svg('<rect x="5" y="4" width="14" height="16" rx="1"/><path d="M9 8h.01M12 8h.01M15 8h.01M9 12h.01M12 12h.01M15 12h.01M10 20v-4h4v4"/>'),
 };
 const EQUIP_GLYPH = {
@@ -161,7 +166,7 @@ function retarget(item, fill) {
     if (!isWork(s)) return;
     const t = suggest(item, wi++);
     s.tw = t.tw; s.tr = t.tr; s.prev = t.prev ? { w: t.prev.w, r: t.prev.r, rir: t.prev.rir } : null;
-    if (fill && !s.done) { s.w = t.tw != null ? kg(t.tw) : ''; s.r = t.tr != null ? String(t.tr) : ''; }
+    if (fill && !s.done) { s.w = t.tw != null ? kg(t.tw) : ''; s.r = String(t.tr != null ? t.tr : Math.round((item.lo + item.hi) / 2)); s.rir = String(item.rir); }
   });
 }
 const newSet = type => ({ type: type || 'n', w: '', r: '', rir: '', partial: false, done: false, tw: null, tr: null, prev: null });
@@ -301,7 +306,7 @@ function doneThisCycle(dayIdx) {
 function render() {
   const keep = [...document.querySelectorAll('[data-keep]')].map(el => [el.dataset.keep, el.scrollLeft]);
   const full = ui.screen;
-  const view = full ? { active: viewActive, complete: viewComplete, program: viewProgram, analytics: viewAnalytics, history: viewHistory }[full]
+  const view = full ? { active: viewActive, complete: viewComplete, preview: viewPreview, program: viewProgram, analytics: viewAnalytics, history: viewHistory }[full]
     : { dash: viewDash, workout: viewWorkout, levels: viewLevels, more: viewMore }[ui.tab];
   const app = document.getElementById('view');
   app.className = full ? 'screen-' + full : 'tab-' + ui.tab;
@@ -447,6 +452,22 @@ function viewProgram() {
     </section>`; }).join('')}`;
 }
 
+const estMin = d => Math.round(d.items.reduce((n, it) => n + it.sets * (it.rest + 40), 0) / 60);
+function viewPreview() {
+  const p = S.program; ui.pv = Math.min(ui.pv, p.days.length - 1);
+  const d = p.days[ui.pv], tm = {};
+  d.items.forEach(it => { const e = exById(it.ex); [e.muscle, ...(e.sec || [])].forEach(m => { tm[m] = tm[m] || { ex: 0, sets: 0 }; tm[m].ex++; tm[m].sets += it.sets; }); });
+  return `<header class="bar three"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>${esc(d.name)}</h1><span><button class="ic" data-act="sheet" data-type="equip" aria-label="Gym settings">${I.gym}</button><button class="ic" data-act="editProgram" data-i="${ui.pv}" aria-label="Edit workout">${I.dots}</button></span></header>
+    <section class="pad">
+      <h2>Target Muscles</h2>
+      <div class="hscroll" data-keep="pvtm">${Object.entries(tm).sort((a, b) => b[1].sets - a[1].sets).map(([m, v]) => `<div class="mcard">${miniBody(m)}<div><b>${m}</b><span>${v.ex} exercises</span><span>${v.sets} sets</span></div></div>`).join('') || '<p class="muted">No exercises yet.</p>'}</div>
+      <div class="h2row"><div><h2>${d.items.length} Exercises</h2><p class="muted">Estimated workout time is ${estMin(d)} min</p></div><button class="hbtn big" data-act="editProgram" data-i="${ui.pv}" aria-label="Add exercises">${I.plus}</button></div>
+    </section>
+    ${d.items.map(it => { const e = exById(it.ex); return `<div class="pvrow">${thumb(it.ex, 'pv')}<div class="grow"><b>${esc(e.name)}</b>
+      ${Array.from({ length: it.sets }, (_, k) => `<span><i class="n">${k + 1}</i>${it.lo}-${it.hi} reps ${rirBadge(it.rir)}</span>`).join('')}${chipsEx(it.ex)}</div></div>`; }).join('')}
+    <div class="startbar"><button class="btn primary" data-act="start" data-i="${ui.pv}">${S.active ? 'Resume Workout' : 'Start Workout'}</button></div>`;
+}
+
 function viewActive() {
   const a = S.active;
   ui.cur = a.items.length ? Math.min(ui.cur, a.items.length - 1) : 0;
@@ -462,19 +483,19 @@ function viewActive() {
       <button class="round" data-act="autofill" aria-label="Fill with today's target">${I.wand}</button>
       <button data-act="exInfo">${I.info}Info</button>
       <button data-act="warmup">${I.warm}Warm Up</button>
+      <button data-act="sheet" data-type="targets">${I.target}Targets</button>
       <button data-act="pick" data-for="swap" data-muscle="${esc(ex.muscle)}">${I.swap}Swap</button>
       <button data-act="noteSheet">${I.note}Note</button>
       <button data-act="delEx">${I.trash}Remove</button></div>
-    ${it.note ? `<p class="exnote">${esc(it.note)}</p>` : ''}
-    <div class="grid">
-      <div class="row head"><span>Set</span><button data-act="colMode">${ui.colMode === 'prev' ? 'Previous' : 'Auto'} ${I.swap}</button><span>Kg</span><span>Reps</span>
+        <div class="grid">
+      <div class="row head"><span>Set</span><button data-act="colMode">${ui.colMode === 'prev' ? 'Previous' : 'Auto'} ${I.swap}</button><span>kg</span><span>Reps</span>
         <button class="box ${it.sets.length && doneCount === it.sets.length ? 'on' : ''}" data-act="checkAll" aria-label="Check all sets">${it.sets.length && doneCount === it.sets.length ? I.check : ''}</button></div>
       ${it.sets.map((s, j) => {
         const label = s.type === 'w' ? 'W' : ++n;
         let mid = '-';
         if (s.type === 'w') mid = 'Warm Up';
         else if (ui.colMode === 'prev') mid = s.prev ? `${s.prev.w ? kg(s.prev.w) + ' kg x ' : ''}${s.prev.r}${s.prev.rir != null ? `<small>${s.prev.rir} RIR</small>` : ''}` : '-';
-        else mid = s.tr != null ? `${s.tw ? kg(s.tw) + ' kg x ' : ''}${s.tr}+` : `${it.lo}-${it.hi} reps`;
+        else mid = `${s.tw ? kg(s.tw) + ' kg x ' + s.tr + '+' : it.lo + '-' + it.hi + ' reps'}<small>${it.rir} RIR</small>`;
         const f = ui.focus && ui.focus.s === j ? ui.focus.f : null;
         return `<div class="row ${s.done ? 'done' : ''}">
           <button class="num" data-act="setMenu" data-s="${j}" aria-label="Set options">${label}</button>
@@ -484,20 +505,23 @@ function viewActive() {
           <button class="box ${s.done ? 'on' : ''}" data-act="check" data-s="${j}" aria-pressed="${s.done}" aria-label="Set done">${s.done ? I.check : ''}</button>
         </div>`; }).join('')}
       <button class="num add" data-act="addSet" aria-label="Add set">${I.plus}</button>
-    </div>` : `<div class="pad"><p class="muted">This workout is empty. Tap + to add an exercise.</p></div>`}
+    </div>
+    <button class="notecard" data-act="noteSheet"><b>Program Note</b>${I.pin}<span>${esc(it.note) || 'Standard Set'}</span></button>` : `<div class="pad"><p class="muted">This workout is empty. Tap + to add an exercise.</p></div>`}
     ${ui.focus && it ? keypad(it, ex) : ''}`;
 }
 
 function keypad(it, ex) {
   const set = it.sets[ui.focus.s];
   let topRow;
-  if (ui.focus.f === 'w' && ex.equip === 'Barbell') {
+  const isW = ui.focus.f === 'w';
+  if (isW && ex.equip === 'Barbell' && ui.plates) {
     const w = num(set.w), bar = S.settings.bar; let side = w != null ? (w - bar) / 2 : -1; const cnt = {};
     if (side >= 0) S.settings.plates.slice().sort((a, b) => b - a).forEach(p => { while (side >= p - 1e-9) { cnt[p] = (cnt[p] || 0) + 1; side -= p; } });
     const col = p => (p >= 25 ? 'var(--red)' : p >= 20 ? 'var(--blue)' : p >= 15 ? 'var(--amber)' : p >= 10 ? 'var(--green)' : 'var(--mid)');
     const list = Object.keys(cnt).map(Number).sort((a, b) => b - a);
     topRow = `<div class="platerow"><span class="barbell">${list.map(p => `<i style="background:${col(p)};height:${14 + Math.min(26, p)}px"></i>`).join('')}</span>
       <div>${list.map(p => `<span><i style="background:${col(p)}"></i>${cnt[p]} x ${kg(p)}</span>`).join('')}<span><i class="barico"></i>${kg(bar)}</span>${side > 0.01 ? `<span>${kg(side * 2)} left over</span>` : ''}</div></div>`;
+  } else if (isW) { topRow = '';
   } else {
     topRow = `<div class="rirrow">${[0, 1, 2, 3, 4, 5, 6].map(v => `<button class="rir ${rirClass(v)} ${String(set.rir) === String(v) ? 'sel' : ''}" data-act="rir" data-v="${v}" aria-label="${v} reps in reserve">${v === 6 ? '6+' : v}</button>`).join('')}<button class="rir q" data-act="rirHelp" aria-label="What is this">?</button></div>`;
   }
@@ -507,9 +531,12 @@ function keypad(it, ex) {
       <div class="nums">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(k).join('')}<button data-act="key" data-k=".">${ui.focus.f === 'w' ? '.' : ''}</button>${k(0)}<button data-act="key" data-k="back" aria-label="Delete">${I.bksp}</button></div>
       <div class="side">
         <button data-act="hideKeys" aria-label="Hide keypad">${I.kbd}</button>
-        <button data-act="clearRir">RIR</button>
+        ${isW ? `<button data-act="togglePlates" ${ex.equip === 'Barbell' ? '' : 'disabled'} aria-label="Plate calculator">${I.plates}</button>
+        <div class="fp step"><button data-act="step" data-dir="-1" aria-label="Less weight">${I.minus}</button><button data-act="step" data-dir="1" aria-label="More weight">${I.plus}</button></div>
+        <button class="ok soft" data-act="ok" aria-label="Next">${I.next}</button>`
+        : `<button data-act="clearRir">RIR</button>
         <div class="fp"><button data-act="fp" data-v="f" aria-pressed="${!set.partial}">F</button><button data-act="fp" data-v="p" aria-pressed="${!!set.partial}">P</button></div>
-        <button class="ok" data-act="ok" aria-label="Confirm">${I.check}</button>
+        <button class="ok" data-act="ok" aria-label="Confirm">${I.check}</button>`}
       </div>
     </div></div>`;
 }
@@ -594,7 +621,9 @@ function viewSheet() {
     ${opt('emptyProgram', I.edit, 'New Program')}${opt('newExSheet', I.gym, 'Custom Exercise')}`;
   if (m.type === 'day') { const d = S.program.days[m.i]; return `<h2>${esc(d.name)}</h2><p class="muted">${d.items.length} exercises</p>
     <button class="btn primary" data-act="start" data-i="${m.i}">Start Workout</button><button class="btn" data-act="editProgram" data-i="${m.i}">Edit</button>`; }
-  if (m.type === 'wmenu') return `${opt('finish', I.check, 'Finish Workout')}${opt('minimize', I.down, 'Minimize')}${opt('pick', I.plus, 'Add Exercise', 'data-for="session"')}${opt('discard', I.trash, 'Discard Workout')}`;
+  if (m.type === 'wmenu') return `<h2 class="center">Workout Options</h2>${opt('minimize', I.down, 'Minimize workout')}${opt('finish', I.check, 'Finish workout')}${opt('sheet', I.timer, 'Workout settings', 'data-type="rest"')}${opt('sheet', I.gym, 'Gym settings', 'data-type="equip"')}${opt('discard', I.trash, 'Discard workout', 'style="color:var(--red)"')}`;
+  if (m.type === 'discard') return `<h2>Discard this workout?</h2><p class="muted">Your progress will be lost and this workout will not be saved.</p><button class="btn red" data-act="discardYes">Discard</button><button class="btn danger plain" data-act="close">Go Back</button>`;
+  if (m.type === 'targets') { const it = S.active.items[ui.cur]; return `<h2>Targets</h2><div class="grid5 four">${[['lo', 'Min reps'], ['hi', 'Max reps'], ['rir', 'RIR'], ['rest', 'Rest (sec)']].map(([f, l]) => `<label>${l}<input inputmode="numeric" data-bind="aitem" data-f="${f}" value="${it[f]}"></label>`).join('')}</div><button class="btn primary" data-act="retargetClose">Done</button>`; }
   if (m.type === 'setMenu') return `<h2>Set Type</h2>${opt('setType', I.workout, 'Standard Set', `data-s="${m.s}" data-t="n"`)}${opt('setType', I.warm, 'Warm Up', `data-s="${m.s}" data-t="w"`)}${opt('delSet', I.trash, 'Delete Set', `data-s="${m.s}"`)}`;
   if (m.type === 'info') { const it = S.active.items[ui.cur], ex = exById(it.ex), rec = recordFor(ex.id);
     const pts = S.history.map(h => { const x = h.items.find(q => q.ex === ex.id); const b = x && bestOf(x.sets); return b ? b.score : null; }).filter(v => v != null);
@@ -655,7 +684,7 @@ const actions = {
   plusSheet() { ui.sheet = { type: 'plus' }; },
   toggleProg() { ui.progOpen = !ui.progOpen; },
   toggleLib(d) { ui.lib = ui.lib === +d.i ? null : +d.i; },
-  daySheet(d) { ui.sheet = { type: 'day', i: +d.i }; },
+  daySheet(d) { ui.pv = +d.i; ui.screen = 'preview'; window.scrollTo(0, 0); },
   useTemplate(d) {
     if (S.program && !confirm(SWITCH)) return;
     const t = clone(TEMPLATES[d.i]); S.program = { name: t.name, days: t.days.map(x => ({ id: uid(), ...x })) }; S.nextDay = 0; ui.lib = null; ui.progOpen = true; window.scrollTo(0, 0);
@@ -683,7 +712,11 @@ const actions = {
   minimize() { ui.screen = null; ui.focus = null; close(); },
   wmenu() { ui.sheet = { type: 'wmenu' }; },
   finish() { finishWorkout(); },
-  discard() { if (confirm('Discard this workout? Nothing is saved.')) { S.active = null; stopRest(); ui.screen = null; ui.focus = null; close(); } },
+  discard() { ui.sheet = { type: 'discard' }; },
+  discardYes() { S.active = null; stopRest(); ui.screen = null; ui.focus = null; close(); },
+  retargetClose() { retarget(curItem(), false); close(); },
+  togglePlates() { ui.plates = !ui.plates; },
+  step(d) { const set = curItem().sets[ui.focus.s], inc = exById(curItem().ex).inc || 2.5; set.w = kg(Math.max(0, (num(set.w) || 0) + +d.dir * inc)); ui.fresh = false; },
   cur(d) { ui.cur = +d.i; ui.focus = null; },
   colMode() { ui.colMode = ui.colMode === 'prev' ? 'auto' : 'prev'; },
   focus(d) { unlockAudio(); ui.focus = { s: +d.s, f: d.f }; ui.fresh = true; },
@@ -764,6 +797,7 @@ document.addEventListener('click', e => {
 // Text fields save without a redraw, so the cursor stays put.
 const binds = {
   note(el) { curItem().note = el.value; },
+  aitem(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(); it[d.f] = Math.round(n); if (it.hi < it.lo) it.hi = it.lo; },
   itemRest(el) { const n = num(el.value); if (n != null) curItem().rest = Math.max(0, Math.round(n)); },
   progName(el) { S.program.name = el.value; },
   dayName(el) { S.program.days[ui.day].name = el.value; },
