@@ -19,7 +19,7 @@ function load() {
 let S = load();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Could not save. The phone is out of space.'); } };
 
-const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
+const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, cal: false, range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
 
 // ---------- Ayudas ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -82,6 +82,9 @@ const I = {
   target: svg('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.500"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'),
   plates: svg('<path d="M4 12h16M8 7v10M16 7v10M5.500 9.500v5M18.500 9.500v5"/>'),
   minus: svg('<path d="M5 12h14"/>'),
+  hist: svg('<rect x="5" y="4" width="13" height="15" rx="2"/><path d="M8.500 8.500h6M8.500 12h3"/><circle cx="16.500" cy="16.500" r="4" fill="var(--fill)"/><path d="M16.500 14.500v2l1.500 1"/>'),
+  enter: svg('<path d="M4 6v12M8 12h12M15 7l5 5-5 5"/>'),
+  route: svg('<circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 6h6a3 3 0 010 6h-4a3 3 0 000 6h6"/>'),
   gym: svg('<rect x="5" y="4" width="14" height="16" rx="1"/><path d="M9 8h.01M12 8h.01M15 8h.01M9 12h.01M12 12h.01M15 12h.01M10 20v-4h4v4"/>'),
 };
 const EQUIP_GLYPH = {
@@ -392,18 +395,27 @@ const chipsEx = id => { const e = exById(id); return `<div class="chips"><span>$
 
 function viewWorkout() {
   const ws = weekStart(Date.now()), today = new Date().setHours(0, 0, 0, 0);
-  const strip = [0, 1, 2, 3, 4, 5, 6].map(i => {
-    const t = ws + i * DAY, d = new Date(t), did = S.history.some(h => h.start >= t && h.start < t + DAY);
-    return `<div class="daypill ${did ? 'did' : ''} ${t === today ? 'today' : ''}"><b>${d.getDate()}</b><span>${['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'][i]}</span></div>`;
-  }).join('');
+  const DN = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+  const pill = (t, i) => { const d = new Date(t), did = S.history.some(h => h.start >= t && h.start < t + DAY);
+    return `<div class="daypill ${did ? 'did' : ''} ${t === today ? 'today' : ''}"><b>${d.getDate()}</b><span>${DN[i]}</span></div>`; };
+  const weekRow = start => [0, 1, 2, 3, 4, 5, 6].map(i => pill(new Date(start).setDate(new Date(start).getDate() + i), i)).join('');
+  let strip = weekRow(ws);
+  if (ui.cal) {
+    // Eight past weeks up to this one, newest at the bottom, with a label when the month changes.
+    const rows = []; let lastM = -1;
+    for (let k = 8; k >= 0; k--) { const st = new Date(ws); st.setDate(st.getDate() - 7 * k); const m = new Date(st.getTime() + 6 * DAY).getMonth();
+      if (m !== lastM) { rows.push(`<p class="mlabel">${new Date(st.getTime() + 6 * DAY).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }).replace(' ', " '")}</p>`); lastM = m; }
+      rows.push(`<div class="week">${weekRow(st.getTime())}</div>`); }
+    strip = rows.join('');
+  }
   const p = S.program;
   const row = (d, i) => { const done = doneThisCycle(i); return `<button class="wrow ${done ? 'dimmed' : ''}" data-act="daySheet" data-i="${i}">
     <div><b>${esc(d.name)}</b>
     <p>${d.items.length ? esc(d.items.map(it => exById(it.ex).name).join(', ')) : 'No exercises yet'}</p>
     ${chips(d.items.map(it => it.ex))}</div>
     <span class="box ${done ? 'on' : ''}">${done ? I.check : ''}</span></button>`; };
-  return `${hero('Workout', hbtn('open', I.cal, 'History', 'data-screen="history"') + hbtn('plusSheet', I.plus, 'Add') + (p ? hbtn('progMenu', I.dots, 'Program options') : ''))}
-    <div class="week top">${strip}</div>
+  return `${hero('Workout', hbtn('toggleCal', I.cal, 'Calendar', ui.cal ? 'aria-pressed="true"' : '') + hbtn('plusSheet', I.plus, 'Add') + (p ? hbtn('progMenu', I.dots, 'Program options') : ''))}
+    ${ui.cal ? `<div class="cal top">${strip}</div>` : `<div class="week top">${strip}</div>`}
     <section class="pad">
       ${S.active ? `<button class="btn primary" data-act="resume">Resume Workout</button>` : ''}
       <div class="h2row"><h2>Active Program</h2>${p ? `<span class="link">Cycle ${cycleNo()}</span>` : ''}</div>
@@ -617,8 +629,15 @@ const opt = (act, icon, text, extra = '') => `<button class="opt" data-act="${ac
 function viewSheet() {
   const m = ui.sheet;
   const nextIdx = S.program && S.program.days.length ? Math.min(S.nextDay, S.program.days.length - 1) : -1;
-  if (m.type === 'plus') return `${S.active ? opt('resume', I.workout, 'Resume Workout') : (nextIdx >= 0 ? opt('start', I.workout, `Start ${esc(S.program.days[nextIdx].name)}`, `data-i="${nextIdx}"`) : '') + opt('startFree', I.plus, 'Empty Workout')}
-    ${opt('emptyProgram', I.edit, 'New Program')}${opt('newExSheet', I.gym, 'Custom Exercise')}`;
+  if (m.type === 'plus') {
+    const sc = (act, icon, label, extra = '') => `<button data-act="${act}" ${extra}><i>${icon}</i>${label}</button>`;
+    const nd = nextIdx >= 0 ? S.program.days[nextIdx] : null;
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Shortcuts</h2><button class="ic" data-act="tab" data-tab="more" aria-label="Settings">${I.sliders}</button></div>
+      <div class="shortcuts">${sc('open', I.hist, 'History', 'data-screen="history"')}${sc('tab', I.levels, 'Levels', 'data-tab="levels"')}${sc('sheet', I.gym, 'Gym', 'data-type="equip"')}${sc('sheet', I.timer, 'Timer', 'data-type="rest"')}</div>
+      ${S.active ? `<button class="upnext" data-act="resume"><div><b>In Progress • ${esc(S.active.dayName)}</b><p>Tap to resume your workout</p></div>${I.right}</button>`
+        : nd ? `<button class="upnext" data-act="daySheet" data-i="${nextIdx}"><div><b>Up Next • ${esc(nd.name)}</b><p>${esc(nd.items.map(it => exById(it.ex).name).join(', '))}</p>${chips(nd.items.map(it => it.ex))}</div>${I.right}</button>` : ''}
+      <div class="srows">${mrow('startFree', I.enter, 'Empty Workout')}${mrow('emptyProgram', I.route, 'New Program')}${S.program ? mrow('addDay', I.workout, 'New Workout') : ''}${mrow('newExSheet', I.plus, 'Custom Exercise')}</div>`;
+  }
   if (m.type === 'day') { const d = S.program.days[m.i]; return `<h2>${esc(d.name)}</h2><p class="muted">${d.items.length} exercises</p>
     <button class="btn primary" data-act="start" data-i="${m.i}">Start Workout</button><button class="btn" data-act="editProgram" data-i="${m.i}">Edit</button>`; }
   if (m.type === 'wmenu') return `<h2 class="center">Workout Options</h2>${opt('minimize', I.down, 'Minimize workout')}${opt('finish', I.check, 'Finish workout')}${opt('sheet', I.timer, 'Workout settings', 'data-type="rest"')}${opt('sheet', I.gym, 'Gym settings', 'data-type="equip"')}${opt('discard', I.trash, 'Discard workout', 'style="color:var(--red)"')}`;
@@ -674,7 +693,7 @@ const actions = {
   tab(d) { ui.tab = d.tab; ui.screen = null; close(); window.scrollTo(0, 0); },
   close,
   sheet(d) { ui.sheet = { type: d.type }; },
-  open(d) { ui.screen = d.screen; if (d.metric) ui.metric = d.metric; window.scrollTo(0, 0); },
+  open(d) { ui.screen = d.screen; if (d.metric) ui.metric = d.metric; close(); window.scrollTo(0, 0); },
   closeScreen() { ui.screen = null; ui.done = null; close(); window.scrollTo(0, 0); },
   dashMode(d) { ui.dashMode = d.m; },
   metric(d) { ui.metric = d.m; },
@@ -682,9 +701,10 @@ const actions = {
   tmMode(d) { ui.tmCycle = !!d.v; },
   flip() { ui.back = !ui.back; },
   plusSheet() { ui.sheet = { type: 'plus' }; },
+  toggleCal() { ui.cal = !ui.cal; },
   toggleProg() { ui.progOpen = !ui.progOpen; },
   toggleLib(d) { ui.lib = ui.lib === +d.i ? null : +d.i; },
-  daySheet(d) { ui.pv = +d.i; ui.screen = 'preview'; window.scrollTo(0, 0); },
+  daySheet(d) { ui.pv = +d.i; ui.screen = 'preview'; close(); window.scrollTo(0, 0); },
   useTemplate(d) {
     if (S.program && !confirm(SWITCH)) return;
     const t = clone(TEMPLATES[d.i]); S.program = { name: t.name, days: t.days.map(x => ({ id: uid(), ...x })) }; S.nextDay = 0; ui.lib = null; ui.progOpen = true; window.scrollTo(0, 0);
@@ -707,7 +727,7 @@ const actions = {
   moveItem(d) { actions.moveKeep(d); close(); },
   moveKeep(d) { const arr = S.program.days[ui.day].items, i = +d.i, j = i + +d.dir; if (j >= 0 && j < arr.length) [arr[i], arr[j]] = [arr[j], arr[i]]; },
   start(d) { if (S.active) { ui.screen = 'active'; close(); return toast('A workout is already in progress.'); } startWorkout(+d.i); },
-  startFree() { startWorkout(null); },
+  startFree() { if (S.active) { ui.screen = 'active'; close(); return; } startWorkout(null); },
   resume() { ui.screen = 'active'; close(); },
   minimize() { ui.screen = null; ui.focus = null; close(); },
   wmenu() { ui.sheet = { type: 'wmenu' }; },

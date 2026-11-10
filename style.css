@@ -350,3 +350,20 @@ main[class^="screen-"] { padding-bottom: calc(env(safe-area-inset-bottom) + 24px
 .btn.red { background: #b3202f; color: #fff; } .btn.plain { color: var(--ink); }
 .sheet h2.center { text-align: center; font-size: 18px; font-weight: 600; padding: 4px 0 8px; }
 .grid5.four { grid-template-columns: repeat(4, 1fr); }
+
+/* ---- Shortcuts y calendario, según la app real ---- */
+.hbtn[aria-pressed=true] { background: var(--prim); color: var(--prim-ink); }
+.cal { padding: 2px 16px 14px; display: flex; flex-direction: column; gap: 10px; }
+.cal .week { padding: 0; }
+.cal .daypill:not(.did) { opacity: .75; }
+.mlabel { font-size: 13px; color: var(--mut); margin: 2px 0 -4px 2px; }
+.shead { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; margin: 0 -8px; padding-bottom: 10px; border-bottom: 2px solid var(--line); }
+.shead h2 { text-align: center; font-size: 20px; }
+.shortcuts { display: grid; grid-template-columns: repeat(4, 1fr); padding: 14px 0 6px; }
+.shortcuts button { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 14px; }
+.shortcuts i { width: 48px; height: 48px; border-radius: 24px; background: var(--fill); display: grid; place-items: center; }
+.upnext { display: flex; align-items: center; gap: 12px; width: 100%; padding: 16px; border: 2px solid var(--line); border-radius: 14px; }
+.upnext div { flex: 1; min-width: 0; } .upnext b { font-size: 17px; font-weight: 500; }
+.upnext p { color: var(--mut); font-size: 15px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.upnext > svg { color: var(--mid); }
+.srows { margin: 4px -16px 0; }
