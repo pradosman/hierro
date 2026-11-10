@@ -477,3 +477,17 @@ main[class^="screen-"] { padding-bottom: calc(env(safe-area-inset-bottom) + 24px
 .mrow small { display: block; color: var(--mut); font-size: 14px; }
 .tsw.first { border-top: 0 !important; }
 .switch input:disabled { opacity: .5; }
+
+/* ---- Gym Profiles y Superset, según la app real ---- */
+.gymrow { align-items: center; }
+.gname { display: flex; align-items: center; gap: 16px; } .gname div { flex: 1; }
+.gname > svg { width: 30px; height: 30px; }
+.eqrow { align-items: flex-start; } .eqrow .box { margin-top: 10px; }
+.eqrow span { white-space: normal; }
+.inl { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 13px; color: var(--mut); text-decoration: underline; text-underline-offset: 3px; }
+.inl input { height: 40px; padding: 0 10px; border-radius: 6px; border: 2px solid transparent; background: var(--fill); font-size: 15px; width: 100%; }
+.inl input:focus { outline: 0; border-color: var(--ink); background: var(--top); }
+.strip .tile.ss { position: relative; }
+.strip .tile.ss::after { content: ""; position: absolute; right: -5px; top: 34px; width: 6px; height: 8px; background: var(--blue); border-radius: 2px; z-index: 1; }
+.strip .tile.ss > i, .strip .tile.ss + .tile > i { background: color-mix(in srgb, var(--blue) 55%, var(--line)); }
+.sstag { display: block; font-style: normal; font-size: 13px; color: var(--blue-soft); margin-top: 2px; }

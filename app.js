@@ -17,6 +17,12 @@ function load() {
   return freshState();
 }
 let S = load();
+// Gym profiles: each one has its own bar, plates and equipment types. Older saves get one built from the old settings.
+const EQ_TYPES = ['Barbell', 'Dumbbell', 'Machine', 'Cable', 'Bodyweight'];
+const newGym = (name, from) => ({ id: uid(), name, bar: from ? from.bar : 20, plates: (from ? from.plates : [25, 20, 15, 10, 5, 2.5, 1.25]).slice(), equip: Object.fromEntries(EQ_TYPES.map(t => [t, from ? from.equip[t] !== false : true])) });
+if (!Array.isArray(S.gyms) || !S.gyms.length) { const g = newGym('Commercial Gym'); g.bar = S.settings.bar || 20; if (Array.isArray(S.settings.plates) && S.settings.plates.length) g.plates = S.settings.plates.slice(); S.gyms = [g]; S.gymId = g.id; }
+const gym = id => S.gyms.find(g => g.id === (id || S.gymId)) || S.gyms[0];
+const gymPieces = g => EQ_TYPES.filter(t => g.equip[t] !== false).length + g.plates.length;
 const applyTheme = () => { const t = S.settings.theme; if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; };
 applyTheme();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Could not save. The phone is out of space.'); } };
@@ -203,7 +209,7 @@ const T = (it, s, f) => (s && s['t' + f] != null ? s['t' + f] : it[f]);
 const progItem = () => { const a = S.active; if (!a || a.dayIdx == null || !S.program || !S.program.days[a.dayIdx]) return null; return S.program.days[a.dayIdx].items.find(x => x.ex === a.items[ui.cur].ex) || null; };
 const newSet = type => ({ type: type || 'n', w: '', r: '', rir: '', partial: false, done: false, tw: null, tr: null, prev: null });
 function newItem(src) {
-  const item = { ex: src.ex, lo: src.lo, hi: src.hi, rir: src.rir, rest: src.rest, note: '', sets: [] };
+  const item = { ex: src.ex, lo: src.lo, hi: src.hi, rir: src.rir, rest: src.rest, ssNext: !!src.ssNext, note: '', sets: [] };
   for (let i = 0; i < src.sets; i++) item.sets.push(newSet());
   retarget(item, true);
   return item;
@@ -226,7 +232,14 @@ function completeSet(i, s) {
   if (!r || r < 1) { toast('Enter the reps.'); return false; }
   set.w = kg(w); set.r = String(Math.round(r));
   set.done = true;
-  if (isWork(set) && item.restOn !== false) startRest(T(item, set, 'rest'));
+  if (isWork(set)) {
+    const items = S.active.items; let lo = i, hi = i;
+    while (lo > 0 && items[lo - 1].ssNext) lo--;
+    while (hi < items.length - 1 && items[hi].ssNext) hi++;
+    const open = k => items[k].sets.some(q => !q.done);
+    if (hi > lo && i < hi) { ui.cur = i + 1; ui.focus = null; }                      // next exercise of the superset, no rest
+    else { if (item.restOn !== false) startRest(T(item, set, 'rest')); if (hi > lo) { const back = [...Array(hi - lo + 1).keys()].map(k => lo + k).find(open); if (back != null) { ui.cur = back; ui.focus = null; } } }
+  }
   return true;
 }
 function bestOf(sets) {
@@ -274,7 +287,7 @@ function finishWorkout() {
   S.active = null; stopRest();
   // What changed against the plan: swapped exercises or a different number of sets.
   const plan = a.dayIdx != null && S.program && S.program.days[a.dayIdx] ? S.program.days[a.dayIdx] : null;
-  const sess = a.items.map(it => ({ ex: it.ex, sets: it.sets.filter(isWork).length, lo: it.lo, hi: it.hi, rir: it.rir, rest: it.rest }));
+  const sess = a.items.map(it => ({ ex: it.ex, sets: it.sets.filter(isWork).length, lo: it.lo, hi: it.hi, rir: it.rir, rest: it.rest, ssNext: !!it.ssNext }));
   const changed = !!plan && JSON.stringify(plan.items.map(x => [x.ex, x.sets])) !== JSON.stringify(sess.map(x => [x.ex, x.sets]));
   ui.done = { entry, records, changed, sess, dayIdx: a.dayIdx }; ui.screen = 'complete'; ui.sheet = null; ui.focus = null;
 }
@@ -517,7 +530,7 @@ function viewProgram() {
       <div class="h2row"><h2>${d.items.length} Exercises</h2><button class="link" data-act="pick" data-for="day">Add Exercises</button></div>
     </section>
     ${d.items.map((it, i) => { const e = exById(it.ex); return `<section class="pex">
-      <div class="pex-head">${thumb(it.ex, 'tall')}<div class="grow"><b>${esc(e.name)}</b>${chipsEx(it.ex)}</div><button class="ic" data-act="itemMenu" data-i="${i}" aria-label="Options for ${esc(e.name)}">${I.dots}</button></div>
+      <div class="pex-head">${thumb(it.ex, 'tall')}<div class="grow"><b>${esc(e.name)}</b>${it.ssNext ? '<em class="sstag">Superset with next</em>' : ''}${chipsEx(it.ex)}</div><button class="ic" data-act="itemMenu" data-i="${i}" aria-label="Options for ${esc(e.name)}">${I.dots}</button></div>
       <button class="wk" data-act="itemEdit" data-i="${i}"><b>1 Cycle</b>
         ${Array.from({ length: it.sets }, (_, k) => `<span><i class="n">${k + 1}</i>${it.lo}-${it.hi} reps ${rirBadge(it.rir)}</span>`).join('')}</button>
       <button class="wk note" data-act="itemEdit" data-i="${i}"><b>Rest Timer</b><span>${clock(it.rest)}</span></button>
@@ -529,13 +542,13 @@ function viewPreview() {
   const p = S.program; ui.pv = Math.min(ui.pv, p.days.length - 1);
   const d = p.days[ui.pv], tm = {};
   d.items.forEach(it => { const e = exById(it.ex); [e.muscle, ...(e.sec || [])].forEach(m => { tm[m] = tm[m] || { ex: 0, sets: 0 }; tm[m].ex++; tm[m].sets += it.sets; }); });
-  return `<header class="bar three"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>${esc(d.name)}</h1><span><button class="ic" data-act="sheet" data-type="equip" aria-label="Gym settings">${I.gym}</button><button class="ic" data-act="editProgram" data-i="${ui.pv}" aria-label="Edit workout">${I.dots}</button></span></header>
+  return `<header class="bar three"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>${esc(d.name)}</h1><span><button class="ic" data-act="sheet" data-type="gyms" aria-label="Gym profiles">${I.gym}</button><button class="ic" data-act="editProgram" data-i="${ui.pv}" aria-label="Edit workout">${I.dots}</button></span></header>
     <section class="pad">
       <h2>Target Muscles</h2>
       <div class="hscroll" data-keep="pvtm">${Object.entries(tm).sort((a, b) => b[1].sets - a[1].sets).map(([m, v]) => `<div class="mcard">${miniBody(m)}<div><b>${m}</b><span>${v.ex} exercises</span><span>${v.sets} sets</span></div></div>`).join('') || '<p class="muted">No exercises yet.</p>'}</div>
       <div class="h2row"><div><h2>${d.items.length} Exercises</h2><p class="muted">Estimated workout time is ${estMin(d)} min</p></div><button class="hbtn big" data-act="editProgram" data-i="${ui.pv}" aria-label="Add exercises">${I.plus}</button></div>
     </section>
-    ${d.items.map(it => { const e = exById(it.ex); return `<div class="pvrow">${thumb(it.ex, 'pv')}<div class="grow"><b>${esc(e.name)}</b>
+    ${d.items.map(it => { const e = exById(it.ex); return `<div class="pvrow">${thumb(it.ex, 'pv')}<div class="grow"><b>${esc(e.name)}</b>${it.ssNext ? '<em class="sstag">Superset with next</em>' : ''}
       ${Array.from({ length: it.sets }, (_, k) => `<span><i class="n">${k + 1}</i>${it.lo}-${it.hi} reps ${rirBadge(it.rir)}</span>`).join('')}${chipsEx(it.ex)}</div></div>`; }).join('')}
     <div class="startbar"><button class="btn primary" data-act="start" data-i="${ui.pv}">${S.active ? 'Resume Workout' : 'Start Workout'}</button></div>`;
 }
@@ -544,13 +557,13 @@ function viewActive() {
   const a = S.active;
   ui.cur = a.items.length ? Math.min(ui.cur, a.items.length - 1) : 0;
   const it = a.items[ui.cur], ex = it && exById(it.ex);
-  const strip = a.items.map((x, i) => { const dn = x.sets.filter(s => s.done).length; return `<button class="tile ${i === ui.cur ? 'cur' : ''}" data-act="cur" data-i="${i}" aria-label="${esc(exById(x.ex).name)}">${thumb(x.ex, 'lg')}<i><b style="width:${x.sets.length ? (dn / x.sets.length) * 100 : 0}%"></b></i></button>`; }).join('');
+  const strip = a.items.map((x, i) => { const dn = x.sets.filter(s => s.done).length; return `<button class="tile ${i === ui.cur ? 'cur' : ''} ${x.ssNext ? 'ss' : ''}" data-act="cur" data-i="${i}" aria-label="${esc(exById(x.ex).name)}">${thumb(x.ex, 'lg')}<i><b style="width:${x.sets.length ? (dn / x.sets.length) * 100 : 0}%"></b></i></button>`; }).join('');
   let n = 0;
   const doneCount = it ? it.sets.filter(s => s.done).length : 0;
   return `<header class="live"><button class="ic" data-act="wmenu" aria-label="Workout menu">${I.menu}</button><span id="elapsed" class="t">0:00:00</span>
       <span class="rest">${I.timer}<span id="restTime" class="t">0:00</span></span><button class="restbar" data-act="restSkip" aria-label="Skip rest"><b id="restBar"></b></button></header>
     <div class="strip" data-keep="strip">${strip}<button class="tile add" data-act="pick" data-for="session" aria-label="Add exercise">${I.plus}<i></i></button></div>
-    ${it ? `<div class="exname"><h2>${esc(ex.name)}</h2><p>Set ${Math.min(doneCount + 1, it.sets.length)} of ${it.sets.length}</p></div>
+    ${it ? `<div class="exname"><h2>${esc(ex.name)}</h2><p>${it.ssNext || (ui.cur > 0 && a.items[ui.cur - 1].ssNext) ? 'Superset • ' : ''}Set ${Math.min(doneCount + 1, it.sets.length)} of ${it.sets.length}</p></div>
     <div class="pills" data-keep="apills">
       <button class="round" data-act="autofill" aria-label="Fill with today's target">${I.wand}</button>
       <button data-act="exInfo">${I.info}Info</button>
@@ -558,6 +571,7 @@ function viewActive() {
       <button data-act="sheet" data-type="targets">${I.target}Targets</button>
       <button data-act="sheet" data-type="swap">${I.swap}Swap</button>
       <button data-act="noteSheet">${I.note}Note</button>
+      <button data-act="sheet" data-type="superset">${I.sort}Superset</button>
       <button data-act="sheet" data-type="equip">${I.gym}Equipment</button>
       <button data-act="sheet" data-type="exMore">${I.dots}More</button></div>
         <div class="grid">
@@ -588,8 +602,8 @@ function keypad(it, ex) {
   let topRow;
   const isW = ui.focus.f === 'w';
   if (isW && ex.equip === 'Barbell' && ui.plates) {
-    const w = num(set.w), bar = S.settings.bar; let side = w != null ? (w - bar) / 2 : -1; const cnt = {};
-    if (side >= 0) S.settings.plates.slice().sort((a, b) => b - a).forEach(p => { while (side >= p - 1e-9) { cnt[p] = (cnt[p] || 0) + 1; side -= p; } });
+    const w = num(set.w), bar = gym().bar; let side = w != null ? (w - bar) / 2 : -1; const cnt = {};
+    if (side >= 0) gym().plates.slice().sort((a, b) => b - a).forEach(p => { while (side >= p - 1e-9) { cnt[p] = (cnt[p] || 0) + 1; side -= p; } });
     const col = p => (p >= 25 ? 'var(--red)' : p >= 20 ? 'var(--blue)' : p >= 15 ? 'var(--amber)' : p >= 10 ? 'var(--green)' : 'var(--mid)');
     const list = Object.keys(cnt).map(Number).sort((a, b) => b - a);
     topRow = `<div class="platerow"><span class="barbell">${list.map(p => `<i style="background:${col(p)};height:${14 + Math.min(26, p)}px"></i>`).join('')}</span>
@@ -688,7 +702,7 @@ function viewMore() {
       <h2>General</h2>
       <div class="card rows">${mrow('sheet', I.scale, 'Units', 'data-type="units"')}${mrow('sheet', I.timer, 'Rest Timer', 'data-type="rest"')}${mrow('sheet', I.globe, 'Language', 'data-type="about"', '<b class="val">English</b>')}</div>
       <h2>Feature Settings</h2>
-      <div class="card rows">${mrow('tab', I.dash, 'Dashboard', 'data-tab="dash"')}${mrow('tab', I.workout, 'Workout', 'data-tab="workout"')}${mrow('plusSheet', I.plus, 'Shortcuts')}${mrow('sheet', I.scale, 'Weight Trend', 'data-type="weightList"')}${mrow('sheet', I.info, 'Exercises', 'data-type="exlib"')}${mrow('sheet', I.gym, 'Gym Profiles', 'data-type="equip"')}</div>
+      <div class="card rows">${mrow('tab', I.dash, 'Dashboard', 'data-tab="dash"')}${mrow('tab', I.workout, 'Workout', 'data-tab="workout"')}${mrow('plusSheet', I.plus, 'Shortcuts')}${mrow('sheet', I.scale, 'Weight Trend', 'data-type="weightList"')}${mrow('sheet', I.info, 'Exercises', 'data-type="exlib"')}${mrow('sheet', I.gym, 'Gym Profiles', 'data-type="gyms"')}</div>
       <h2>Theme</h2>
       <div class="themes">${tile('light', 'Light')}${tile('dark', 'Dark')}${tile('system', 'System')}</div>
       <h2>Data Management</h2>
@@ -742,6 +756,9 @@ function viewSheet() {
     return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>${esc(ex.name)}</h2><span></span></div>
       <div class="tabsrow even intabs">${[['inst', 'Instructions'], ['det', 'Details'], ['hist', 'History']].map(([k, l]) => `<button data-act="infoTab" data-t="${k}" aria-selected="${tab === k}">${l}</button>`).join('')}</div>
       <div class="infobody">${body1}</div>`; }
+  if (m.type === 'superset') { const last = ui.cur >= S.active.items.length - 1, it = S.active.items[ui.cur];
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Superset</h2><span></span></div>
+      <label class="field switch tsw first"><span><b>Superset with next</b>${last ? 'This is the last exercise of the workout.' : 'Alternate sets with ' + esc(exById(S.active.items[ui.cur + 1].ex).name) + ' and rest after both.'}</span><input type="checkbox" data-bind="ssNext" ${it.ssNext ? 'checked' : ''} ${last ? 'disabled' : ''}></label>`; }
   if (m.type === 'wmore') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>More</h2><span></span></div>
       <div class="srows">${mrow('startFree', I.enter, 'Start Empty Workout')}${mrow('open', I.hist, 'Workout History', 'data-screen="history"')}${mrow('sheet', I.sliders, 'Customize Sections', 'data-type="sections"')}${S.program ? mrow('progMenu', I.edit, 'Edit Program') : ''}<div class="mrow">${I.gym}<span>Archive<small>Archive is empty</small></span>${I.right}</div></div>`;
   if (m.type === 'sections') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Customize Sections</h2><span></span></div>
@@ -776,7 +793,7 @@ function viewSheet() {
     return `<div class="ptop"><button class="hbtn" data-act="close" aria-label="Close">${I.x}</button><button class="hbtn" data-act="newExSheet" aria-label="Custom exercise">${I.plus}</button>
         <div class="tray">${I.workout}<span>${m.added ? m.added + ' added' : m.for === 'swap' ? 'Pick a replacement' : ''}</span></div><button class="hbtn" data-act="close" aria-label="Done">${I.down}</button></div>
       <div class="pills" data-keep="pf">
-        <button data-act="pickEquip">${I.gym}${m.equip && m.equip !== 'All' ? m.equip : 'Gym'} ${I.down}</button>
+        <button data-act="pickGym" aria-pressed="${m.gymOnly !== false}">${I.gym}${m.gymOnly !== false ? esc(gym().name) : 'All Equipment'} ${I.down}</button>
         <button data-act="pickMuscle" data-m="All" aria-pressed="${(m.muscle || 'All') === 'All'}">All muscles</button>
         ${m.muscle && m.muscle !== 'All' ? `<button aria-pressed="true" data-act="pickMuscle" data-m="All">${m.muscle} ${I.x}</button>` : ''}</div>
       <div class="mtiles" data-keep="pm">${MUSCLES.map(x => `<button data-act="pickMuscle" data-m="${x}" aria-pressed="${m.muscle === x}">${miniBody(x)}<span>${x}</span></button>`).join('')}</div>
@@ -792,7 +809,7 @@ function viewSheet() {
   if (m.type === 'itemEdit') { const it = S.program.days[ui.day].items[m.i];
     return `<h2>${esc(exById(it.ex).name)}</h2><div class="grid5">${[['sets', 'Sets'], ['lo', 'Min reps'], ['hi', 'Max reps'], ['rir', 'RIR'], ['rest', 'Rest (sec)']].map(([f, l]) => `<label>${l}<input inputmode="numeric" data-bind="pitem" data-i="${m.i}" data-f="${f}" value="${it[f]}"></label>`).join('')}</div>
       <button class="btn primary" data-act="close">Done</button>`; }
-  if (m.type === 'itemMenu') return `<h2>${esc(exById(S.program.days[ui.day].items[m.i].ex).name)}</h2>${opt('itemEdit', I.edit, 'Edit Sets', `data-i="${m.i}"`)}${opt('moveItem', I.up, 'Move Up', `data-i="${m.i}" data-dir="-1"`)}${opt('moveItem', I.down, 'Move Down', `data-i="${m.i}" data-dir="1"`)}${opt('delItem', I.trash, 'Remove Exercise', `data-i="${m.i}"`)}`;
+  if (m.type === 'itemMenu') return `<h2>${esc(exById(S.program.days[ui.day].items[m.i].ex).name)}</h2>${opt('itemEdit', I.edit, 'Edit Sets', `data-i="${m.i}"`)}${opt('itemSs', I.sort, S.program.days[ui.day].items[m.i].ssNext ? 'Remove Superset' : 'Superset with next', `data-i="${m.i}"`)}${opt('moveItem', I.up, 'Move Up', `data-i="${m.i}" data-dir="-1"`)}${opt('moveItem', I.down, 'Move Down', `data-i="${m.i}" data-dir="1"`)}${opt('delItem', I.trash, 'Remove Exercise', `data-i="${m.i}"`)}`;
   if (m.type === 'reorder') return `<h2>Re-order</h2>${S.program.days[ui.day].items.map((it, i) => `<div class="opt"><span class="grow">${esc(exById(it.ex).name)}</span><button class="ic" data-act="moveKeep" data-i="${i}" data-dir="-1" aria-label="Move up">${I.up}</button><button class="ic" data-act="moveKeep" data-i="${i}" data-dir="1" aria-label="Move down">${I.down}</button></div>`).join('')}<button class="btn primary" data-act="close">Done</button>`;
   if (m.type === 'progMenu') return `<h2>Program</h2><label class="field">Name<input data-bind="progName" value="${esc(S.program.name)}"></label>${opt('editProgram', I.edit, 'Edit Program')}${opt('addDay', I.plus, 'Add Workout')}${opt('delProgram', I.trash, 'Remove Program')}<button class="btn primary" data-act="close">Done</button>`;
   if (m.type === 'rename') return `<h2>Rename</h2><label class="field">Workout name<input data-bind="dayName" value="${esc(S.program.days[ui.day].name)}"></label><button class="btn primary" data-act="close">Done</button>`;
@@ -807,10 +824,22 @@ function viewSheet() {
   if (m.type === 'about') return `<h2>About</h2><p class="muted">Hierro is a personal strength training log. Everything you enter stays on this phone.</p><div class="card list"><div><span>Workouts logged</span><b>${S.history.length}</b></div><div><span>Exercises</span><b>${allEx().length}</b></div></div><button class="btn primary" data-act="close">Done</button>`;
   if (m.type === 'exlib') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Exercises</h2><button class="ic" data-act="newExSheet" aria-label="Custom exercise">${I.plus}</button></div>
     <div id="pickList">${allEx().map(e => `<div class="pk">${thumb(e.id)}<div><b>${esc(e.name)}</b>${chipsEx(e.id)}</div></div>`).join('')}</div>`;
-  if (m.type === 'equip') return `<h2>Gym Equipment</h2>
-    <label class="field">Bar weight (kg)<input inputmode="decimal" data-bind="setting" data-f="bar" value="${kg(S.settings.bar)}"></label>
-    <label class="field">Plates you have (kg)<input data-bind="setting" data-f="plates" value="${S.settings.plates.map(kg).join(' ')}"></label>
-    <button class="btn primary" data-act="close">Done</button>`;
+  if (m.type === 'gyms') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Gym Profiles</h2><span></span></div>
+      <h3 class="subh">${S.gyms.length} Gym${S.gyms.length === 1 ? '' : 's'}</h3>
+      ${S.gyms.map(g => `<div class="pk gymrow"><button class="grow gname" data-act="gymDefault" data-id="${g.id}">${I.gym}<div><b>${esc(g.name)}</b><span>${gymPieces(g)} pieces of equipment</span>${g.id === gym().id ? '<span>Default</span>' : ''}</div></button><button class="hbtn" data-act="gymOpen" data-id="${g.id}" aria-label="Edit ${esc(g.name)}">${I.edit}</button></div>`).join('')}
+      <button class="btn" data-act="gymAdd">Add New Gym Profile</button>`;
+  if (m.type === 'equip') { const g = gym(m.id), f = (m.q || '').toLowerCase(), all = ui.eqAll;
+    const ROWS = [['Free Weights', [['Barbell', 'Barbell', `${kg(g.bar)} kg bar`, 'bar'], ['plates', 'Weight Plates', g.plates.map(p => kg(p) + ' kg').join(', '), 'plates'], ['Dumbbell', 'Dumbbells', 'Any pair you have', null]]], ['Machines', [['Machine', 'Machines', 'Plate-loaded and pin-loaded', null], ['Cable', 'Cables', 'Pulleys and handles', null]]], ['Other', [['Bodyweight', 'Bodyweight', 'Bars, benches and floor', null]]]];
+    const on = k => (k === 'plates' ? g.equip.Barbell !== false : g.equip[k] !== false);
+    return `<div class="shead"><button class="ic" data-act="${m.back ? 'gymBack' : 'close'}" aria-label="${m.back ? 'Back' : 'Close'}">${m.back ? I.back : I.x}</button><h2>${esc(g.name)}</h2><span></span></div>
+      <div class="pills"><button data-act="gymRename" data-id="${g.id}">${I.edit}Rename Gym</button><button data-act="gymDup" data-id="${g.id}">${I.note}Duplicate</button>${g.id === gym().id ? '' : `<button data-act="gymDefault" data-id="${g.id}">${I.check}Set as Default</button>`}${S.gyms.length > 1 ? `<button data-act="gymDel" data-id="${g.id}">${I.trash}Delete</button>` : ''}</div>
+      ${m.rename ? `<label class="field">Gym name<input data-bind="gymName" data-id="${g.id}" value="${esc(g.name)}"></label>` : ''}
+      <div class="h2row first"><h2>Equipment</h2><div class="seg mini"><button data-act="eqAll" data-v="" aria-pressed="${!all}">Selected</button><button data-act="eqAll" data-v="1" aria-pressed="${!!all}">All</button></div></div>
+      ${ROWS.map(([title, rows]) => { const vis = rows.filter(r => (all || on(r[0])) && r[1].toLowerCase().includes(f)); if (!vis.length) return '';
+        return `<div class="h2row psec"><h3>${title}</h3></div>${vis.map(([k, label, detail, edit]) => `<div class="pk eqrow"><span class="thumb"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${EQUIP_GLYPH[k === 'plates' ? 'Barbell' : k]}</svg></span><div><b>${label}</b><span>${detail}</span>
+          ${edit === 'bar' ? `<label class="inl">Bar weight (kg)<input inputmode="decimal" data-bind="gymF" data-id="${g.id}" data-f="bar" value="${kg(g.bar)}"></label>` : edit === 'plates' ? `<label class="inl">Edit Weights (kg)<input data-bind="gymF" data-id="${g.id}" data-f="plates" value="${g.plates.map(kg).join(' ')}"></label>` : ''}</div>
+          ${k === 'plates' ? '' : `<button class="box ${on(k) ? 'on' : ''}" data-act="eqToggle" data-id="${g.id}" data-k="${k}" aria-pressed="${on(k)}" aria-label="${label}">${on(k) ? I.check : ''}</button>`}</div>`).join('')}`; }).join('')}
+      <div class="pbottom"><label class="search">${I.search}<input type="search" placeholder="Filter equipment by name" aria-label="Filter equipment by name" data-bind="eqQ" value="${esc(m.q || '')}"></label></div>`; }
   if (m.type === 'rest') return `<h2>Rest Timer</h2>
     <label class="field">Default for new exercises (sec)<input inputmode="numeric" data-bind="setting" data-f="rest" value="${S.settings.rest}"></label>
     <label class="field switch">Alert sound<input type="checkbox" data-bind="setting" data-f="sound" ${S.settings.sound ? 'checked' : ''}></label>
@@ -820,7 +849,7 @@ function viewSheet() {
 const GROUPS = [['Free Weights', ['Barbell', 'Dumbbell']], ['Machines', ['Machine']], ['Cables', ['Cable']], ['Bodyweight', ['Bodyweight']]];
 function pickList() {
   const m = ui.sheet, q = (m.q || '').toLowerCase();
-  const ok = e => (!m.muscle || m.muscle === 'All' || e.muscle === m.muscle || (e.sec || []).includes(m.muscle)) && (!m.equip || m.equip === 'All' || e.equip === m.equip) && e.name.toLowerCase().includes(q);
+  const ok = e => (!m.muscle || m.muscle === 'All' || e.muscle === m.muscle || (e.sec || []).includes(m.muscle)) && (m.gymOnly === false || gym().equip[e.equip] !== false) && e.name.toLowerCase().includes(q);
   const list = allEx().map(fixEx).filter(ok).sort((x, y) => x.name.localeCompare(y.name));
   const row = e => `<div class="pk">${thumb(e.id, 'tall')}<div><b>${esc(e.name)}</b><span>${e.muscle}${(e.sec || []).length ? ' • ' + e.sec.join(', ') : ''}</span></div><button class="hbtn" data-act="choose" data-ex="${esc(e.id)}" aria-label="Add ${esc(e.name)}">${I.plus}</button></div>`;
   return GROUPS.map(([title, eqs]) => { const g = list.filter(e => eqs.includes(e.equip)); if (!g.length) return ''; const open = m.open === title || q || g.length <= 4;
@@ -872,6 +901,7 @@ const actions = {
   delDay() { if (S.program.days.length < 2) return toast('A program needs at least one workout.'); if (confirm('Delete this workout from the program?')) { S.program.days.splice(ui.day, 1); ui.day = 0; S.nextDay = 0; } },
   itemMenu(d) { ui.sheet = { type: 'itemMenu', i: +d.i }; },
   itemEdit(d) { ui.sheet = { type: 'itemEdit', i: +d.i }; },
+  itemSs(d) { const arr = S.program.days[ui.day].items, it = arr[+d.i]; if (+d.i >= arr.length - 1 && !it.ssNext) { close(); return toast('There is no next exercise to pair with.'); } it.ssNext = !it.ssNext; close(); },
   delItem(d) { S.program.days[ui.day].items.splice(+d.i, 1); close(); },
   moveItem(d) { actions.moveKeep(d); close(); },
   moveKeep(d) { const arr = S.program.days[ui.day].items, i = +d.i, j = i + +d.dir; if (j >= 0 && j < arr.length) [arr[i], arr[j]] = [arr[j], arr[i]]; },
@@ -935,7 +965,16 @@ const actions = {
   restSkip() { stopRest(); },
   pick(d) { ui.sheet = { type: 'pick', for: d.for, muscle: d.muscle || 'All', equip: 'All', q: '', added: 0 }; ui.focus = null; },
   pickMuscle(d) { ui.sheet.muscle = ui.sheet.muscle === d.m ? 'All' : d.m; },
-  pickEquip() { const EQ = ['All', ...Object.keys(EQUIP_GLYPH)], m = ui.sheet; m.equip = EQ[(EQ.indexOf(m.equip || 'All') + 1) % EQ.length]; },
+  pickGym() { ui.sheet.gymOnly = ui.sheet.gymOnly === false; },
+  gymOpen(d) { ui.sheet = { type: 'equip', id: d.id, back: true }; },
+  gymBack() { ui.sheet = { type: 'gyms' }; },
+  gymAdd() { const g = newGym('New Gym'); S.gyms.push(g); ui.sheet = { type: 'equip', id: g.id, back: true, rename: true }; },
+  gymDup(d) { const g = newGym(gym(d.id).name + ' Copy', gym(d.id)); S.gyms.push(g); ui.sheet = { type: 'equip', id: g.id, back: true, rename: true }; },
+  gymRename() { ui.sheet.rename = !ui.sheet.rename; },
+  gymDefault(d) { S.gymId = d.id; toast(gym().name + ' is now your default gym.'); },
+  gymDel(d) { if (S.gyms.length < 2 || !confirm('Delete this gym profile?')) return; S.gyms = S.gyms.filter(g => g.id !== d.id); if (S.gymId === d.id) S.gymId = S.gyms[0].id; ui.sheet = { type: 'gyms' }; },
+  eqAll(d) { ui.eqAll = !!d.v; },
+  eqToggle(d) { const g = gym(d.id); g.equip[d.k] = g.equip[d.k] === false; },
   pickOpen(d) { ui.sheet.open = ui.sheet.open === d.g ? null : d.g; },
   newExSheet() { ui.sheet = { type: 'newEx', back: ui.sheet && ui.sheet.type === 'pick' ? ui.sheet : null }; },
   saveEx() {
@@ -957,7 +996,7 @@ const actions = {
     a.download = `hierro-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000); toast('Backup saved.');
   },
-  wipe() { if (confirm('Delete ALL data? Your program and history will be lost.')) { S = freshState(); ui.tab = 'dash'; ui.screen = null; } },
+  wipe() { if (confirm('Delete ALL data? Your program and history will be lost.')) { S = freshState(); const g = newGym('Commercial Gym'); S.gyms = [g]; S.gymId = g.id; ui.tab = 'dash'; ui.screen = null; } },
 };
 function choose(exId) {
   const m = ui.sheet, base = { ex: exId, sets: 3, lo: 8, hi: 12, rir: 2, rest: S.settings.rest };
@@ -980,6 +1019,10 @@ const binds = {
   tset(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(), q = it.sets[d.s]; q['t' + d.f] = Math.round(n); if (T(it, q, 'hi') < T(it, q, 'lo')) q.thi = T(it, q, 'lo'); },
   restOn(el) { curItem().restOn = el.checked; },
   showLib(el) { S.settings.hideLib = !el.checked; },
+  gymName(el, d) { const v = el.value.trim(); if (v) gym(d.id).name = v; },
+  gymF(el, d) { const g = gym(d.id); if (d.f === 'bar') { const n = num(el.value); if (n != null && n >= 0) g.bar = n; } else { const p = el.value.split(/[\s;,]+/).map(num).filter(n => n > 0); if (p.length) g.plates = p; } },
+  eqQ(el) { ui.sheet.q = el.value; },
+  ssNext(el) { curItem().ssNext = el.checked; render(); },
   planUp(el) { if (ui.done) ui.done.planUp = el.checked; },
   aitem(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(); it[d.f] = Math.round(n); if (it.hi < it.lo) it.hi = it.lo; },
   itemRest(el) { const n = num(el.value); if (n != null) curItem().rest = Math.max(0, Math.round(n)); },
@@ -1003,13 +1046,13 @@ const binds = {
       const data = JSON.parse(t);
       if (!data || !Array.isArray(data.history)) throw new Error('format');
       if (!confirm('This replaces all your data with the backup. Continue?')) return;
-      S = Object.assign(freshState(), data); save(); render(); toast('Backup loaded.');
+      S = Object.assign(freshState(), data); if (!Array.isArray(S.gyms) || !S.gyms.length) { const g = newGym('Commercial Gym'); S.gyms = [g]; S.gymId = g.id; } save(); render(); toast('Backup loaded.');
     }).catch(() => toast('That file is not a Hierro backup.'));
   },
 };
 function onField(e) {
   const el = e.target.closest('[data-bind]'); if (!el) return;
-  const b = el.dataset.bind, live = ['note', 'pickQ', 'progName', 'dayName'];
+  const b = el.dataset.bind, live = ['note', 'pickQ', 'progName', 'dayName', 'gymName'];
   if ((e.type === 'input') !== live.includes(b)) return;
   binds[b](el, el.dataset); save();
 }
