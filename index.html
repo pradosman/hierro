@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hierro</title>
+<meta name="theme-color" content="#18202b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hierro">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="view"></main>
+
+<div id="rest" hidden>
+  <div class="rest-fill"></div>
+  <span class="rest-label">Descansa</span>
+  <span class="rest-time">0:00</span>
+  <button id="restAdd" type="button">+30 s</button>
+  <button id="restSkip" type="button">Saltar</button>
+</div>
+
+<nav id="tabs" aria-label="Secciones">
+  <button data-act="tab" data-tab="hoy">Hoy</button>
+  <button data-act="tab" data-tab="programa">Programa</button>
+  <button data-act="tab" data-tab="historial">Historial</button>
+  <button data-act="tab" data-tab="progreso">Progreso</button>
+  <button data-act="tab" data-tab="ajustes">Ajustes</button>
+</nav>
+
+<div id="modal" hidden></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
