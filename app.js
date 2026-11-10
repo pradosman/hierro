@@ -19,7 +19,7 @@ function load() {
 let S = load();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Could not save. The phone is out of space.'); } };
 
-const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, cal: false, range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
+const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, cal: false, dashPage: 0, recMode: '1rm', range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
 
 // ---------- Ayudas ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -299,6 +299,16 @@ function cycleProgress() {
   (S.program ? S.program.days : []).forEach(d => d.items.forEach(it => { t.exs.add(it.ex); t.muscles.add(exById(it.ex).muscle); t.sets += it.sets; }));
   return { muscles: [muscles.size, t.muscles.size], sets: [sets, t.sets], exs: [exs.size, t.exs.size] };
 }
+// Best recent result per exercise, for the Recent Records page.
+function recentRecords() {
+  const best = {};
+  S.history.slice(-12).forEach(h => h.items.forEach(it => it.sets.filter(isWork).forEach(s => {
+    const v = ui.recMode === 'vol' ? s.w * s.r : ui.recMode === 'reps' ? s.r : e1rm(s.w, s.r, 0);
+    if (v > 0 && (!best[it.ex] || v > best[it.ex])) best[it.ex] = v;
+  })));
+  const rows = Object.entries(best).slice(-7), mx = Math.max(1, ...rows.map(r => r[1]));
+  return rows.map(([id, v]) => ({ name: exById(id).name, pct: Math.max(4, (v / mx) * 100), label: ui.recMode === 'reps' ? `${v} reps` : `${kg(Math.round(v * 10) / 10)} kg` }));
+}
 const cycleNo = () => (S.program && S.program.days.length ? Math.floor(S.history.filter(h => h.prog).length / S.program.days.length) + 1 : 1);
 function doneThisCycle(dayIdx) {
   const n = S.program.days.length, hs = S.history.filter(h => h.prog);
@@ -314,7 +324,7 @@ function render() {
   const app = document.getElementById('view');
   app.className = full ? 'screen-' + full : 'tab-' + ui.tab;
   app.innerHTML = view();
-  document.getElementById('tabs').hidden = !!full;
+  document.getElementById('tabs').hidden = !!full && full !== 'analytics';
   document.querySelectorAll('#tabs [data-tab]').forEach(b => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
   const m = document.getElementById('modal');
   m.innerHTML = ui.sheet ? `<div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${viewSheet()}</div>` : '';
@@ -351,7 +361,11 @@ function viewDash() {
   const m7 = muscleSets(Date.now() - 7 * DAY, Date.now() + DAY);
   const top2 = Object.entries(m7).sort((a, b) => b[1] - a[1]).slice(0, 2);
   return `${hero('Dashboard', hbtn('tab', I.sliders, 'Settings', 'data-tab="more"'))}
-    <section class="top dashtop">
+${ui.dashPage ? `<section class="top dashtop">
+      <h2 class="rec-title">Recent Records</h2>
+      <div class="recbars">${recentRecords().map(r => `<div><span>${esc(r.name)}</span><i><b style="width:${r.pct}%"></b>${r.label}</i></div>`).join('') || '<p class="muted">Log a workout to see your records.</p>'}</div>
+      <div class="seg" role="group">${[['vol', 'Volume'], ['reps', 'Reps'], ['1rm', '1-RM']].map(([k, l]) => `<button data-act="recMode" data-m="${k}" aria-pressed="${ui.recMode === k}">${l}</button>`).join('')}</div>
+    </section>` : `    <section class="top dashtop">
       <h2>Cycle Workouts</h2>
       <div class="rings">${ring(w.muscles[0], w.muscles[1], 'var(--blue-soft)')}${ring(w.sets[0], w.sets[1], 'var(--coral)', true)}${ring(w.exs[0], w.exs[1], 'var(--cyan)')}</div>
       <div class="ring-labels">
@@ -360,8 +374,8 @@ function viewDash() {
         <div><b>Exercises</b><span>${w.exs[1]} target</span></div>
       </div>
       <div class="seg" role="group"><button data-act="dashMode" data-m="prog" aria-pressed="${ui.dashMode === 'prog'}">Active Program</button><button data-act="dashMode" data-m="all" aria-pressed="${ui.dashMode === 'all'}">All Workouts</button></div>
-    </section>
-    <div class="pager"><i class="on"></i><i></i></div>
+    </section>`}
+    <div class="pager"><button data-act="dashPage" data-p="0" class="${ui.dashPage ? '' : 'on'}" aria-label="Cycle Workouts"></button><button data-act="dashPage" data-p="1" class="${ui.dashPage ? 'on' : ''}" aria-label="Recent Records"></button></div>
     <section class="pad">
       <h2>Insights &amp; Analytics</h2>
       <div class="two">
@@ -580,23 +594,31 @@ function viewLevels() {
 }
 
 function viewAnalytics() {
-  const R = { '1W': [7, 1], '1M': [4, 7], '3M': [12, 7] }[ui.range] || [7, 1], [nb, span] = R;
+  const R = { '1W': [7, 1], '1M': [4, 7], '3M': [12, 7], '6M': [26, 7], '1Y': [12, 30], All: [12, 30] }[ui.range] || [7, 1], [nb, span] = R;
   const end = span === 1 ? new Date().setHours(0, 0, 0, 0) + DAY : weekStart(Date.now()) + 7 * DAY;
-  const key = ui.metric === 'sets' ? 'sets' : 'vol';
+  const key = ui.metric === 'sets' ? 'sets' : 'vol', unit = ui.metric === 'sets' ? 'sets' : 'kg', Name = ui.metric === 'sets' ? 'Sets' : 'Volume';
   const buckets = Array.from({ length: nb }, (_, i) => { const from = end - (nb - i) * span * DAY; const hs = S.history.filter(h => h.start >= from && h.start < from + span * DAY);
-    const d = new Date(from); return { v: hs.reduce((n, h) => n + sessionStats(h)[key], 0), label: span === 1 ? d.toLocaleDateString('en-US', { weekday: 'short' }) : `${d.getMonth() + 1}/${d.getDate()}` }; });
-  const total = buckets.reduce((n, b) => n + b.v, 0), mx = Math.max(1, ...buckets.map(b => b.v)), unit = ui.metric === 'sets' ? 'sets' : 'kg';
-  const top = {};
-  S.history.filter(h => h.start >= Date.now() - 30 * DAY).forEach(h => h.items.forEach(it => { top[it.ex] = (top[it.ex] || 0) + (ui.metric === 'sets' ? it.sets.filter(isWork).length : it.sets.filter(isWork).reduce((n, s) => n + s.w * s.r, 0)); }));
+    const d = new Date(from); return { from, v: hs.reduce((n, h) => n + sessionStats(h)[key], 0), label: span === 1 ? d.toLocaleDateString('en-US', { weekday: 'short' }) : span === 7 ? `${d.getMonth() + 1}/${d.getDate()}` : d.toLocaleDateString('en-US', { month: 'short' }) }; });
+  const total = buckets.reduce((n, b) => n + b.v, 0), used = buckets.filter(b => b.v > 0).length;
+  const raw = Math.max(10, ...buckets.map(b => b.v)), mx = Math.ceil(raw / 10) * 10;
   const fmt = v => Math.round(v).toLocaleString('en-US');
+  const dfmt = t => new Date(t).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+  const every = Math.ceil(nb / 7);
+  const months = {};
+  S.history.slice().reverse().forEach(h => { const k = new Date(h.start).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }); (months[k] = months[k] || []).push(h); });
   return `<header class="bar"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>Workouts</h1><span class="ic"></span></header>
-    <div class="tabsrow even"><button data-act="metric" data-m="sets" aria-selected="${ui.metric === 'sets'}">Sets</button><button data-act="metric" data-m="vol" aria-selected="${ui.metric === 'vol'}">Volume</button></div>
+    <div class="tabsrow even ic2"><button data-act="metric" data-m="sets" aria-selected="${ui.metric === 'sets'}">${I.next}Sets</button><button data-act="metric" data-m="vol" aria-selected="${ui.metric === 'vol'}">${I.plates}Volume</button></div>
+    <section class="top chartbox">
+      <div class="stats"><div><span>Average ${Name}</span><b>${used ? fmt(total / used) : '--'} <small>${unit}</small></b></div><div><span>Total ${Name}</span><b>${fmt(total)} <small>${unit}</small></b></div></div>
+      <p class="range">${dfmt(buckets[0].from)} - ${dfmt(end - DAY)}, ${new Date(end - DAY).getFullYear()}</p>
+      <div class="chart2"><div class="grid2"><i></i><i></i><i></i></div>
+        <div class="bigbars">${buckets.map((b, i) => `<div><i style="height:${(b.v / mx) * 100}%"></i><span>${i % every === 0 ? b.label : ''}</span></div>`).join('')}</div>
+        <div class="yax"><span>${fmt(mx)}</span><span>${fmt(mx / 2)}</span><span>0</span></div></div>
+      <div class="seg wide3">${['1W', '1M', '3M', '6M', '1Y', 'All'].map(r => `<button data-act="range" data-r="${r}" aria-pressed="${ui.range === r}">${r}</button>`).join('')}</div>
+    </section>
     <section class="pad">
-      <div class="stats"><div><span>Average ${ui.metric === 'sets' ? 'Sets' : 'Volume'}</span><b>${fmt(total / nb)} <small>${unit}</small></b></div><div><span>Total ${ui.metric === 'sets' ? 'Sets' : 'Volume'}</span><b>${fmt(total)} <small>${unit}</small></b></div></div>
-      <div class="bigbars">${buckets.map(b => `<div><i style="height:${(b.v / mx) * 100}%"></i><span>${b.label}</span></div>`).join('')}</div>
-      <div class="seg wide3">${['1W', '1M', '3M'].map(r => `<button data-act="range" data-r="${r}" aria-pressed="${ui.range === r}">${r}</button>`).join('')}</div>
-      <h2>Top 5 Exercises by ${ui.metric === 'sets' ? 'Sets' : 'Volume'}</h2><p class="muted">Last 30 Days</p>
-      <div class="card list">${Object.entries(top).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id, v]) => `<div><span>${esc(exById(id).name)}</span><b>${fmt(v)} ${unit}</b></div>`).join('') || '<div><span>No workouts yet.</span></div>'}</div>
+      <div class="card legendcard"><i class="lg"></i>${Name}</div>
+      ${Object.entries(months).map(([k, hs]) => `<h2>${k}</h2>${hs.map(h => { const st = sessionStats(h); return `<button class="card hrow" data-act="openDetail" data-id="${h.id}"><div><b>${ui.metric === 'sets' ? st.sets + ' sets' : fmt(st.vol) + ' kg'}</b><span>${new Date(h.start).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })}</span></div>${I.right}</button>`; }).join('')}`).join('') || '<p class="muted">No workouts yet.</p>'}
     </section>`;
 }
 
@@ -696,6 +718,8 @@ const actions = {
   open(d) { ui.screen = d.screen; if (d.metric) ui.metric = d.metric; close(); window.scrollTo(0, 0); },
   closeScreen() { ui.screen = null; ui.done = null; close(); window.scrollTo(0, 0); },
   dashMode(d) { ui.dashMode = d.m; },
+  dashPage(d) { ui.dashPage = +d.p; },
+  recMode(d) { ui.recMode = d.m; },
   metric(d) { ui.metric = d.m; },
   range(d) { ui.range = d.r; },
   tmMode(d) { ui.tmCycle = !!d.v; },
@@ -790,6 +814,7 @@ const actions = {
   },
   choose(d) { choose(d.ex); },
   openHist(d) { ui.openHist = ui.openHist === d.id ? null : d.id; },
+  openDetail(d) { ui.openHist = d.id; ui.screen = 'history'; window.scrollTo(0, 0); },
   delHist(d) { if (confirm('Delete this workout? This cannot be undone.')) S.history = S.history.filter(h => h.id !== d.id); },
   export() {
     const a = document.createElement('a');

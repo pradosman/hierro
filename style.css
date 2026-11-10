@@ -367,3 +367,34 @@ main[class^="screen-"] { padding-bottom: calc(env(safe-area-inset-bottom) + 24px
 .upnext p { color: var(--mut); font-size: 15px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .upnext > svg { color: var(--mid); }
 .srows { margin: 4px -16px 0; }
+
+/* ---- Recent Records y gráficas, según la app real ---- */
+.pager button { width: 6px; height: 6px; border-radius: 3px; background: var(--mid); padding: 0; position: relative; }
+.pager button::after { content: ""; position: absolute; inset: -14px -6px; }
+.pager button.on { background: var(--ink); }
+.rec-title { padding-left: 26px; }
+.recbars { display: flex; flex-direction: column; gap: 14px; padding: 16px 0 6px 26px; min-height: 252px; }
+.recbars div { display: grid; grid-template-columns: 118px 1fr; align-items: center; gap: 10px; font-size: 16px; position: relative; }
+.recbars span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recbars i { display: flex; align-items: center; gap: 8px; height: 12px; }
+.recbars b { display: block; height: 100%; background: #ffd15c; flex: none; max-width: calc(100% - 78px); }
+.recbars em { position: absolute; right: 0; font-style: normal; background: var(--top); padding-left: 8px; display: none; }
+.recbars i::after { content: attr(data-v); }
+.tabsrow.ic2 button { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 17px; }
+.tabsrow.ic2 svg { width: 22px; height: 22px; }
+.chartbox { padding: 14px 16px 16px; }
+.stats { gap: 0; display: grid; grid-template-columns: 1fr 1fr; padding-left: 8px; } .stats b { font-size: 28px; }
+.range { padding: 2px 0 14px 8px; font-size: 17px; }
+.chart2 { position: relative; display: grid; grid-template-columns: 1fr 26px; height: 250px; margin-bottom: 30px; }
+.chart2 .bigbars { height: 100%; margin: 0; border-bottom: 1px solid var(--mid); padding: 0 8px; gap: 10px; position: relative; }
+.grid2 { position: absolute; inset: 0 26px 0 0; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+.grid2 i { border-top: 1px dashed var(--mid); } .grid2 i:last-child { border: 0; }
+.yax { display: flex; flex-direction: column; justify-content: space-between; text-align: right; font-size: 14px; color: var(--mut); transform: translateY(8px); padding-bottom: 0; }
+.yax span { line-height: 1; transform: translateY(-8px); }
+.seg.wide3 button { padding: 0 6px; }
+.legendcard { display: flex; align-items: center; justify-content: center; gap: 10px; height: 56px; font-size: 16px; }
+.lg { width: 16px; height: 18px; background: linear-gradient(90deg, var(--coral) 28%, transparent 28% 36%, var(--coral) 36% 64%, transparent 64% 72%, var(--coral) 72%); clip-path: polygon(0 45%, 28% 45%, 28% 0, 64% 0, 64% 62%, 100% 62%, 100% 100%, 0 100%); }
+.hrow { display: flex; align-items: center; width: 100%; padding: 16px 16px 16px 20px; }
+.hrow div { flex: 1; } .hrow b { display: block; font-size: 17px; font-weight: 500; } .hrow span { color: var(--mut); font-size: 15px; } .hrow svg { color: var(--mid); }
+.screen-analytics { padding-bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom) + 24px) !important; }
+.recbars i { font-style: normal; white-space: nowrap; }
