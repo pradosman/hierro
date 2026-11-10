@@ -19,7 +19,7 @@ function load() {
 let S = load();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Could not save. The phone is out of space.'); } };
 
-const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, cal: false, dashPage: 0, recMode: '1rm', range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
+const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, cal: false, dashPage: 0, recMode: '1rm', infoTab: 'inst', warmMode: 'smart', range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
 
 // ---------- Ayudas ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -93,6 +93,13 @@ const EQUIP_GLYPH = {
   Machine: '<path d="M10 32V8h8v24M14 12h0M14 16h0M14 20h0M18 14h10v8M24 32v-6h6v6"/>',
   Cable: '<path d="M10 32V8h18M24 8v12"/><circle cx="24" cy="23" r="3"/><path d="M19 30h10"/>',
   Bodyweight: '<circle cx="20" cy="10" r="3.500"/><path d="M20 14v10M12 17h16M20 24l-5 8M20 24l5 8"/>',
+};
+const CUES = {
+  Barbell: ['Set the bar at a height you can unrack without strain. Load both sides evenly and lock the collars.', 'Brace before every rep. Keep the bar on the same path each time. End the set when your form changes.'],
+  Dumbbell: ['Pick a pair you can bring into position safely. Set the bench angle before you sit down.', 'Move both sides at the same speed. Control the way down. Do not swing the weight.'],
+  Machine: ['Adjust the seat and pads so the joint that moves lines up with the pivot of the machine.', 'Start each rep from a full stretch. Push or pull smoothly. Do not let the stack slam.'],
+  Cable: ['Set the pulley height and choose the handle first. Stand or sit so the cable pulls in line with the movement.', 'Keep tension on the cable for the whole rep. Do not lean back to move more weight.'],
+  Bodyweight: ['Find a stable bar, bench or floor space. Warm up the joints you will load.', 'Use the full range you can control. Add weight only when the top of the rep range feels easy.'],
 };
 const thumb = (exId, cls = '') => {
   const ex = exById(exId);
@@ -508,7 +515,7 @@ function viewActive() {
     <div class="pills" data-keep="apills">
       <button class="round" data-act="autofill" aria-label="Fill with today's target">${I.wand}</button>
       <button data-act="exInfo">${I.info}Info</button>
-      <button data-act="warmup">${I.warm}Warm Up</button>
+      <button data-act="warmSheet">${I.warm}Warm Up</button>
       <button data-act="sheet" data-type="targets">${I.target}Targets</button>
       <button data-act="pick" data-for="swap" data-muscle="${esc(ex.muscle)}">${I.swap}Swap</button>
       <button data-act="noteSheet">${I.note}Note</button>
@@ -617,7 +624,7 @@ function viewAnalytics() {
       <div class="seg wide3">${['1W', '1M', '3M', '6M', '1Y', 'All'].map(r => `<button data-act="range" data-r="${r}" aria-pressed="${ui.range === r}">${r}</button>`).join('')}</div>
     </section>
     <section class="pad">
-      <div class="card legendcard"><i class="lg"></i>${Name}</div>
+      <div class="card legendcard"><i class="lgd"></i>${Name}</div>
       ${Object.entries(months).map(([k, hs]) => `<h2>${k}</h2>${hs.map(h => { const st = sessionStats(h); return `<button class="card hrow" data-act="openDetail" data-id="${h.id}"><div><b>${ui.metric === 'sets' ? st.sets + ' sets' : fmt(st.vol) + ' kg'}</b><span>${new Date(h.start).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })}</span></div>${I.right}</button>`; }).join('')}`).join('') || '<p class="muted">No workouts yet.</p>'}
     </section>`;
 }
@@ -666,13 +673,27 @@ function viewSheet() {
   if (m.type === 'discard') return `<h2>Discard this workout?</h2><p class="muted">Your progress will be lost and this workout will not be saved.</p><button class="btn red" data-act="discardYes">Discard</button><button class="btn danger plain" data-act="close">Go Back</button>`;
   if (m.type === 'targets') { const it = S.active.items[ui.cur]; return `<h2>Targets</h2><div class="grid5 four">${[['lo', 'Min reps'], ['hi', 'Max reps'], ['rir', 'RIR'], ['rest', 'Rest (sec)']].map(([f, l]) => `<label>${l}<input inputmode="numeric" data-bind="aitem" data-f="${f}" value="${it[f]}"></label>`).join('')}</div><button class="btn primary" data-act="retargetClose">Done</button>`; }
   if (m.type === 'setMenu') return `<h2>Set Type</h2>${opt('setType', I.workout, 'Standard Set', `data-s="${m.s}" data-t="n"`)}${opt('setType', I.warm, 'Warm Up', `data-s="${m.s}" data-t="w"`)}${opt('delSet', I.trash, 'Delete Set', `data-s="${m.s}"`)}`;
-  if (m.type === 'info') { const it = S.active.items[ui.cur], ex = exById(it.ex), rec = recordFor(ex.id);
-    const pts = S.history.map(h => { const x = h.items.find(q => q.ex === ex.id); const b = x && bestOf(x.sets); return b ? b.score : null; }).filter(v => v != null);
-    let ch = '<p class="muted">Log this exercise twice to see your strength trend.</p>';
-    if (pts.length > 1) { const lo = Math.min(...pts), hi = Math.max(...pts), sp = hi - lo || 1; const xy = pts.map((v, i) => [8 + i * (304 / (pts.length - 1)), 92 - ((v - lo) / sp) * 80]);
-      ch = `<svg class="spark big" viewBox="0 0 320 100"><polyline points="${xy.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ')}"/>${xy.map(p => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3"/>`).join('')}</svg>`; }
-    return `<h2>${esc(ex.name)}</h2>${chipsEx(ex.id)}<div class="card list"><div><span>Equipment</span><b>${ex.equip}</b></div><div><span>Target</span><b>${it.lo}-${it.hi} reps, ${it.rir} RIR</b></div><div><span>Best Set</span><b>${rec ? `${rec.w ? kg(rec.w) + ' kg x ' : ''}${rec.r}` : 'None yet'}</b></div></div>${ch}
-      <label class="field">Rest Timer (sec)<input inputmode="numeric" data-bind="itemRest" value="${it.rest}"></label><button class="btn primary" data-act="close">Done</button>`; }
+  if (m.type === 'info') { const it = S.active.items[ui.cur], ex = exById(it.ex), rec = recordFor(ex.id), tab = ui.infoTab;
+    const past = S.history.slice().reverse().map(h => ({ h, x: h.items.find(q => q.ex === ex.id) })).filter(p => p.x);
+    const body1 = tab === 'inst' ? `<div class="media">${thumb(ex.id, 'hero')}</div>
+        <div class="h2row first"><h2>Setting up</h2></div><p class="muted">${CUES[ex.equip][0]}</p>
+        <h2>Performing</h2><p class="muted">${CUES[ex.equip][1]}</p>`
+      : tab === 'det' ? `<h2>Target Muscles</h2><div class="hscroll">${[[ex.muscle, 'Primary'], ...(ex.sec || []).map(x => [x, 'Secondary'])].map(([mm, k]) => `<div class="mcard">${miniBody(mm)}<div><b>${mm}</b><span>${k}</span></div></div>`).join('')}</div>
+        <h2>Properties</h2><div class="card list"><div><span>Weight step</span><b>${ex.inc ? kg(ex.inc) + ' kg' : 'Bodyweight'}</b></div><div><span>Target</span><b>${it.lo}-${it.hi} reps, ${it.rir} RIR</b></div><div><span>Best set</span><b>${rec ? `${rec.w ? kg(rec.w) + ' kg x ' : ''}${rec.r}` : 'None yet'}</b></div></div>
+        <h2>Resistance Equipment</h2><div class="card equipcard">${thumb(ex.id)}<b>${ex.equip}</b></div>`
+      : `<div class="pills"><button>1-RM ${I.down}</button><button>Most Recent ${I.down}</button></div>
+        ${past.length ? past.map(p => `<div class="card hrow"><div><b>${p.x.sets.filter(isWork).map(q => `${q.w ? kg(q.w) + ' x ' : ''}${q.r}`).join(', ')}</b><span>${new Date(p.h.start).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })}</span></div></div>`).join('')
+          : `<div class="card emptycard">${I.hist}<p>You haven't logged this exercise yet. Its history will show here after your first workout with it.</p></div>`}`;
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>${esc(ex.name)}</h2><span></span></div>
+      <div class="tabsrow even intabs">${[['inst', 'Instructions'], ['det', 'Details'], ['hist', 'History']].map(([k, l]) => `<button data-act="infoTab" data-t="${k}" aria-selected="${tab === k}">${l}</button>`).join('')}</div>
+      <div class="infobody">${body1}</div>`; }
+  if (m.type === 'warm') { const it = S.active.items[ui.cur], first = it.sets.find(isWork), top = first && num(first.w);
+    const step = exById(it.ex).inc || 2.5, plan = top ? [[0.5, 8], [0.7, 5], [0.85, 2]].map(([f, r]) => [roundTo(top * f, step), r]) : [];
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Warm Up</h2><span></span></div>
+      <div class="h2row first"><h2>Set Calculator</h2><div class="seg mini"><button data-act="warmMode" data-v="smart" aria-pressed="${ui.warmMode === 'smart'}">Smart</button><button data-act="warmMode" data-v="scheme" aria-pressed="${ui.warmMode === 'scheme'}">Scheme</button></div></div>
+      ${plan.length ? `<div class="card list">${plan.map(([w, r], i) => `<div><span>Warm-up ${i + 1}</span><b>${kg(w)} kg x ${r}</b></div>`).join('')}</div><button class="btn primary" data-act="warmup">Add warm-up sets</button>`
+        : `<div class="card emptycard">${I.warm}<p>${ui.warmMode === 'smart' ? 'Smart warm-ups show here once the first set has a weight.' : 'Enter the weight of your first set to build a 50 / 70 / 85 % scheme.'}</p></div>`}
+      <h2>More Options</h2>${mrow('warmEmpty', I.plus, 'Add empty warm-up set')}`; }
   if (m.type === 'note') return `<h2>Note</h2><label class="field"><textarea data-bind="note" rows="3" placeholder="Add a note">${esc(S.active.items[ui.cur].note)}</textarea></label><button class="btn primary" data-act="close">Save</button>`;
   if (m.type === 'pick') return `<h2>${m.for === 'swap' ? 'Swap Exercise' : 'Add Exercises'}</h2>
     <input type="search" placeholder="Search exercises" aria-label="Search exercises" data-bind="pickQ" value="${esc(m.q)}">
@@ -790,14 +811,18 @@ const actions = {
   setType(d) { const it = curItem(); it.sets[d.s].type = d.t; retarget(it, false); close(); },
   delSet(d) { curItem().sets.splice(+d.s, 1); ui.focus = null; close(); },
   autofill() { retarget(curItem(), true); toast("Filled with today's target."); },
-  exInfo() { ui.sheet = { type: 'info' }; },
+  exInfo() { ui.sheet = { type: 'info' }; ui.infoTab = 'inst'; },
+  infoTab(d) { ui.infoTab = d.t; },
+  warmSheet() { ui.sheet = { type: 'warm' }; },
+  warmMode(d) { ui.warmMode = d.v; },
+  warmEmpty() { const it = curItem(); it.sets.unshift(newSet('w')); close(); },
   noteSheet() { ui.sheet = { type: 'note' }; },
   warmup() {
     const it = curItem(), first = it.sets.find(isWork), top = first && num(first.w);
     if (!top) return toast('Enter the weight of your first set first.');
     const step = exById(it.ex).inc || 2.5;
     const warm = [[0.5, 8], [0.7, 5], [0.85, 2]].map(([f, r]) => ({ ...newSet('w'), w: kg(roundTo(top * f, step)), r: String(r) }));
-    it.sets = warm.concat(it.sets.filter(isWork)); ui.focus = null;
+    it.sets = warm.concat(it.sets.filter(isWork)); ui.focus = null; close();
   },
   delEx() { if (confirm('Remove this exercise from the workout?')) { S.active.items.splice(ui.cur, 1); ui.cur = Math.max(0, ui.cur - 1); ui.focus = null; } },
   restSkip() { stopRest(); },
