@@ -272,7 +272,11 @@ function finishWorkout() {
   S.history.push(entry);
   if (a.dayIdx != null && S.program) S.nextDay = (a.dayIdx + 1) % S.program.days.length;
   S.active = null; stopRest();
-  ui.done = { entry, records }; ui.screen = 'complete'; ui.sheet = null; ui.focus = null;
+  // What changed against the plan: swapped exercises or a different number of sets.
+  const plan = a.dayIdx != null && S.program && S.program.days[a.dayIdx] ? S.program.days[a.dayIdx] : null;
+  const sess = a.items.map(it => ({ ex: it.ex, sets: it.sets.filter(isWork).length, lo: it.lo, hi: it.hi, rir: it.rir, rest: it.rest }));
+  const changed = !!plan && JSON.stringify(plan.items.map(x => [x.ex, x.sets])) !== JSON.stringify(sess.map(x => [x.ex, x.sets]));
+  ui.done = { entry, records, changed, sess, dayIdx: a.dayIdx }; ui.screen = 'complete'; ui.sheet = null; ui.focus = null;
 }
 
 // ---------- Descanso ----------
@@ -552,7 +556,7 @@ function viewActive() {
       <button data-act="exInfo">${I.info}Info</button>
       <button data-act="warmSheet">${I.warm}Warm Up</button>
       <button data-act="sheet" data-type="targets">${I.target}Targets</button>
-      <button data-act="pick" data-for="swap" data-muscle="${esc(ex.muscle)}">${I.swap}Swap</button>
+      <button data-act="sheet" data-type="swap">${I.swap}Swap</button>
       <button data-act="noteSheet">${I.note}Note</button>
       <button data-act="sheet" data-type="equip">${I.gym}Equipment</button>
       <button data-act="sheet" data-type="exMore">${I.dots}More</button></div>
@@ -619,7 +623,8 @@ function viewComplete() {
     ${records.length ? `<div class="hscroll recs" data-keep="recs">${records.map(r => `<div class="rec">${I.trophy}<div class="v"><b>${esc(r.val)}</b><span>New!</span></div><b>${esc(exById(r.ex).name)}</b><span>${r.kind}</span></div>`).join('')}</div>` : ''}
     <section class="pad"><h2>Workout Details</h2>
       <div class="card list"><div><span>Workout</span><b>${esc(entry.dayName)}</b></div><div><span>Duration</span><b>${mins(entry.end - entry.start)} min</b></div><div><span>Sets</span><b>${st.sets}</b></div><div><span>Volume</span><b>${st.vol.toLocaleString('en-US')} kg</b></div></div>
-      <button class="btn primary" data-act="closeScreen">Done</button></section>`;
+      ${entry.prog && ui.done.changed ? `<label class="field switch tsw"><span><b>Update Workout Plan</b>Save these changes as the new default for this workout</span><input type="checkbox" data-bind="planUp"></label>` : ''}
+      <button class="btn primary" data-act="doneComplete">Done</button></section>`;
 }
 
 function viewLevels() {
@@ -737,6 +742,14 @@ function viewSheet() {
     return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>${esc(ex.name)}</h2><span></span></div>
       <div class="tabsrow even intabs">${[['inst', 'Instructions'], ['det', 'Details'], ['hist', 'History']].map(([k, l]) => `<button data-act="infoTab" data-t="${k}" aria-selected="${tab === k}">${l}</button>`).join('')}</div>
       <div class="infobody">${body1}</div>`; }
+  if (m.type === 'swap') { const it = S.active.items[ui.cur], ex = exById(it.ex);
+    const line = e => `${e.muscle}${(e.sec || []).length ? ' • ' + e.sec.join(', ') : ''}`;
+    const subs = allEx().map(fixEx).filter(e => e.id !== ex.id && e.muscle === ex.muscle).sort((a, b) => (b.equip === ex.equip) - (a.equip === ex.equip) || a.name.localeCompare(b.name)).slice(0, 6);
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Swap</h2><span></span></div>
+      <div class="pk cur">${thumb(ex.id, 'tall')}<div><b>${esc(ex.name)}</b><span>${line(ex)}</span></div></div>
+      <h3 class="subh">Smart Substitutions</h3>
+      ${subs.map(e => `<div class="pk">${thumb(e.id, 'tall')}<div><b>${esc(e.name)}</b><span>${line(e)}</span></div><button class="hbtn" data-act="swapTo" data-ex="${esc(e.id)}" aria-label="Swap to ${esc(e.name)}">${I.swap}</button></div>`).join('') || '<p class="muted">No close substitutes for this one.</p>'}
+      <button class="btn" data-act="pick" data-for="swap" data-muscle="${esc(ex.muscle)}">Find Other Replacements</button>`; }
   if (m.type === 'warm') { const it = S.active.items[ui.cur], first = it.sets.find(isWork), top = first && num(first.w);
     const step = exById(it.ex).inc || 2.5, plan = top ? [[0.5, 8], [0.7, 5], [0.85, 2]].map(([f, r]) => [roundTo(top * f, step), r]) : [];
     return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Warm Up</h2><span></span></div>
@@ -818,6 +831,7 @@ const actions = {
   close,
   sheet(d) { ui.sheet = { type: d.type }; },
   open(d) { ui.screen = d.screen; if (d.metric) ui.metric = d.metric; close(); window.scrollTo(0, 0); },
+  doneComplete() { const d = ui.done; if (d && d.planUp && d.changed && S.program && S.program.days[d.dayIdx]) { const old = S.program.days[d.dayIdx].items; S.program.days[d.dayIdx].items = d.sess.filter(x => x.sets > 0).map(x => ({ ...x, note: (old.find(o => o.ex === x.ex) || {}).note })); toast('Workout plan updated.'); } actions.closeScreen(); },
   closeScreen() { ui.screen = null; ui.done = null; close(); window.scrollTo(0, 0); },
   dashMode(d) { ui.dashMode = d.m; },
   dashPage(d) { ui.dashPage = +d.p; },
@@ -927,6 +941,7 @@ const actions = {
     if (back) choose(ex.id); else toast('Exercise saved.');
   },
   choose(d) { choose(d.ex); },
+  swapTo(d) { const it = curItem(); it.ex = d.ex; retarget(it, true); close(); toast('Swapped to ' + exById(d.ex).name + '.'); },
   openHist(d) { ui.openHist = ui.openHist === d.id ? null : d.id; },
   openDetail(d) { ui.openHist = d.id; ui.screen = 'history'; window.scrollTo(0, 0); },
   delHist(d) { if (confirm('Delete this workout? This cannot be undone.')) S.history = S.history.filter(h => h.id !== d.id); },
@@ -958,6 +973,7 @@ const binds = {
   note(el) { const k = ui.noteTab, pi = progItem(); if (k === 'session') S.active.note = el.value; else if (k === 'exercise') curItem().note = el.value; else if (pi) pi.note = el.value; const c = document.getElementById('noteCount'); if (c) c.textContent = el.value.length + '/300'; },
   tset(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(), q = it.sets[d.s]; q['t' + d.f] = Math.round(n); if (T(it, q, 'hi') < T(it, q, 'lo')) q.thi = T(it, q, 'lo'); },
   restOn(el) { curItem().restOn = el.checked; },
+  planUp(el) { if (ui.done) ui.done.planUp = el.checked; },
   aitem(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(); it[d.f] = Math.round(n); if (it.hi < it.lo) it.hi = it.lo; },
   itemRest(el) { const n = num(el.value); if (n != null) curItem().rest = Math.max(0, Math.round(n)); },
   progName(el) { S.program.name = el.value; },
