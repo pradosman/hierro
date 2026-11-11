@@ -1,4 +1,5 @@
 import { EXERCISES, MUSCLES, UPPER, LOWER, TEMPLATES } from './data.js';
+import { readXlsx, parseProgram, guessExercise, norm, titleCase, TYPE_NAMES, parseExerciseTable, parseTsv } from './import.js';
 
 // ---------- Guardado ----------
 const KEY = 'hierro.v1';
@@ -9,7 +10,7 @@ function freshState() {
   return {
     v: 2,
     settings: { bar: 20, plates: [25, 20, 15, 10, 5, 2.5, 1.25], rest: 120, sound: true, theme: 'system' },
-    custom: [], weights: [], program: null, nextDay: 0, active: null, restEnd: null, restTotal: 0, history: [],
+    custom: [], userLib: [], weights: [], program: null, nextDay: 0, active: null, restEnd: null, restTotal: 0, history: [],
   };
 }
 function load() {
@@ -33,7 +34,9 @@ const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = v => { if (v === '' || v == null) return null; const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; };
 const kg = n => (n == null ? '' : String(Math.round(n * 100) / 100));
-const allEx = () => EXERCISES.concat(S.custom);
+// Every exercise we can resolve by id. With a database of your own loaded, lists show only yours (and your custom ones).
+const allEx = () => EXERCISES.concat(S.userLib || [], S.custom);
+const listEx = () => ((S.userLib || []).length ? S.userLib.concat(S.custom) : EXERCISES.concat(S.custom));
 const LEGACY = { Back: 'Lats', Shoulders: 'Side Delts', Pecho: 'Chest', Espalda: 'Lats', Hombro: 'Side Delts', 'Bíceps': 'Biceps', 'Tríceps': 'Triceps', 'Cuádriceps': 'Quads', Isquios: 'Hamstrings', 'Glúteo': 'Glutes', Gemelo: 'Calves', Abdomen: 'Abs' };
 const fixEx = e => (e && LEGACY[e.muscle] ? { ...e, muscle: LEGACY[e.muscle], sec: (e.sec || []).map(m => LEGACY[m] || m) } : e);
 const exMod = id => (S.exMods || {})[id] || {};
@@ -100,6 +103,7 @@ const I = {
   scale: svg('<rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9.500 9h5"/><circle cx="12" cy="9" r=".5"/>'),
   globe: svg('<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.500 2.500 2.500 13.500 0 16M12 4c-2.500 2.500-2.500 13.500 0 16"/>'),
   search: svg('<circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/>'),
+  play: svg('<path d="M8 5.500v13l11-6.500z"/>', true),
   gym: svg('<rect x="5" y="4" width="14" height="16" rx="1"/><path d="M9 8h.01M12 8h.01M15 8h.01M9 12h.01M12 12h.01M15 12h.01M10 20v-4h4v4"/>'),
 };
 const EQUIP_GLYPH = {
@@ -175,7 +179,7 @@ const FRONT = ['Chest', 'Front Delts', 'Side Delts', 'Biceps', 'Abs', 'Obliques'
 // Recorte de la figura alrededor de cada músculo, para las tarjetas pequeñas.
 const TORSO = '40 44 120 112', ARMS = '22 44 156 146', MID = '40 92 120 112', THIGH = '45 190 110 103', SHIN = '45 296 110 103';
 const CROP = { Chest: TORSO, 'Upper Back': TORSO, Lats: '40 64 120 112', 'Upper Traps': '45 30 110 103', Neck: '50 22 100 93', Serratus: '40 70 120 112', 'Front Delts': ARMS, 'Side Delts': ARMS, 'Rear Delts': ARMS, Biceps: '22 62 156 146', Triceps: '22 62 156 146', Forearms: '0 122 110 103', Abs: MID, Obliques: MID, 'Lower Back': MID, Quads: THIGH, Hamstrings: THIGH, Adductors: THIGH, Abductors: '45 150 110 103', Glutes: '45 150 110 103', Calves: SHIN, Tibs: SHIN };
-const miniBody = m => body({ [m]: 1 }, FRONT.includes(m) ? 'front' : 'back', 'mini', CROP[m]);
+const miniBody = m => body({ [m]: 1 }, FRONT.includes(m) ? 'front' : 'back', 'mini', CROP[m] || '0 0 200 420');
 
 // ---------- Regla de progreso ----------
 function lastSets(exId) {
@@ -187,33 +191,39 @@ function lastSets(exId) {
   }
   return null;
 }
-function suggest(item, workIdx) {
+// A program exercise may carry setsT: one { type, lo, hi, rir, rest } per set. Without it, every set uses the exercise values.
+const setRows = it => (it.setsT && it.setsT.length ? it.setsT : Array.from({ length: it.sets }, () => ({ type: 'n', lo: it.lo, hi: it.hi, rir: it.rir, rest: it.rest })));
+// Keeps the plain fields (sets, lo, hi, rir, rest) in step with the per-set list, for the code that only needs a summary.
+function syncItem(it) { if (!it.setsT || !it.setsT.length) return it; const f = it.setsT.find(q => q.lo != null) || it.setsT[0]; it.sets = it.setsT.length; it.lo = f.lo != null ? f.lo : (it.lo || 8); it.hi = f.hi != null ? f.hi : (it.hi || 12); it.rir = f.rir != null ? f.rir : (it.rir || 0); it.rest = f.rest != null ? f.rest : (it.rest || S.settings.rest); return it; }
+function suggest(item, workIdx, set) {
   const prev = lastSets(item.ex);
   if (!prev) return { tw: null, tr: null, prev: null };
   const p = prev[Math.min(workIdx, prev.length - 1)];
   const inc = exById(item.ex).inc;
-  const rir = p.rir == null ? item.rir : p.rir;
-  const eff = p.r + rir - item.rir; // reps que valdrían con la reserva pedida
-  if (!p.w || !inc) return { tw: p.w || 0, tr: Math.max(item.lo, eff + 1), prev: p };
-  if (eff >= item.hi) {
+  const LO = T(item, set, 'lo'), HI = T(item, set, 'hi'), RIR = T(item, set, 'rir');
+  const rir = p.rir == null ? RIR : p.rir;
+  const eff = p.r + rir - RIR; // reps que valdrían con la reserva pedida
+  if (!p.w || !inc) return { tw: p.w || 0, tr: Math.max(LO, eff + 1), prev: p };
+  if (eff >= HI) {
     // Expand Rep Range: when one weight step is a big jump, ask for a few more reps first.
-    if (S.settings.expandRange !== false && inc / p.w > 0.08 && eff < item.hi + 3) return { tw: p.w, tr: eff + 1, prev: p };
-    return { tw: p.w + inc, tr: item.lo, prev: p };
+    if (S.settings.expandRange !== false && inc / p.w > 0.08 && eff < HI + 3) return { tw: p.w, tr: eff + 1, prev: p };
+    return { tw: p.w + inc, tr: LO, prev: p };
   }
-  if (eff <= item.lo - 2) return { tw: Math.max(0, p.w - inc), tr: item.lo, prev: p };
-  if (eff < item.lo) return { tw: p.w, tr: item.lo, prev: p };
-  return { tw: p.w, tr: Math.min(item.hi, eff + 1), prev: p };
+  if (eff <= LO - 2) return { tw: Math.max(0, p.w - inc), tr: LO, prev: p };
+  if (eff < LO) return { tw: p.w, tr: LO, prev: p };
+  return { tw: p.w, tr: Math.min(HI, eff + 1), prev: p };
 }
 function retarget(item, fill) {
   let wi = 0;
   item.sets.forEach(s => {
     if (!isWork(s)) return;
-    const t = suggest(item, wi++);
+    const t = suggest(item, wi++, s);
     if (S.settings.weightMatch === true) { if (wi === 1) item._tw = t.tw; else if (item._tw != null && t.tw != null) t.tw = item._tw; }
     s.tw = t.tw; s.tr = t.tr; s.prev = t.prev ? { w: t.prev.w, r: t.prev.r, rir: t.prev.rir } : null;
     if (fill && !s.done) { const smart = S.settings.smart !== false, pw = t.prev ? t.prev.w : null, pr = t.prev ? t.prev.r : null;
       s.w = smart ? (t.tw != null ? kg(t.tw) : '') : (pw != null ? kg(pw) : '');
-      s.r = String(smart ? (t.tr != null ? t.tr : Math.round((item.lo + item.hi) / 2)) : (pr != null ? pr : Math.round((item.lo + item.hi) / 2)));
+      const mid = s.noRange ? '' : Math.round((T(item, s, 'lo') + T(item, s, 'hi')) / 2);
+      s.r = String(smart ? (t.tr != null && !s.noRange ? t.tr : (pr != null && s.noRange ? pr : mid)) : (pr != null ? pr : mid));
       s.rir = S.settings.rirTrack === false ? '' : String(T(item, s, 'rir')); }
   });
 }
@@ -228,7 +238,11 @@ function warmPlan(it) {
 const newSet = type => ({ type: type || 'n', w: '', r: '', rir: '', partial: false, done: false, tw: null, tr: null, prev: null });
 function newItem(src) {
   const item = { ex: src.ex, lo: src.lo, hi: src.hi, rir: src.rir, rest: src.rest, ssNext: !!src.ssNext, note: '', sets: [] };
-  for (let i = 0; i < src.sets; i++) item.sets.push(newSet());
+  setRows(src).forEach(q => { const set = newSet(q.type || 'n');
+    if (q.lo != null) { set.tlo = q.lo; set.thi = q.hi; } else if (src.setsT) set.noRange = true;
+    if (q.rir != null) set.trir = q.rir;
+    if (q.rest != null) set.trest = q.rest;
+    item.sets.push(set); });
   retarget(item, true);
   return item;
 }
@@ -312,11 +326,11 @@ function finishWorkout() {
   });
   const entry = { id: uid(), start: a.start, end: Date.now(), note: a.note || '', dayName: a.dayName, dayIdx: a.dayIdx, prog: a.dayIdx != null, items };
   S.history.push(entry);
-  if (a.dayIdx != null && S.program) S.nextDay = (a.dayIdx + 1) % S.program.days.length;
+  if (a.dayIdx != null && S.program) markDay(a.dayIdx, true);
   S.active = null; stopRest();
   // What changed against the plan: swapped exercises or a different number of sets.
   const plan = a.dayIdx != null && S.program && S.program.days[a.dayIdx] ? S.program.days[a.dayIdx] : null;
-  const sess = a.items.map(it => ({ ex: it.ex, sets: it.sets.filter(isWork).length, lo: it.lo, hi: it.hi, rir: it.rir, rest: it.rest, ssNext: !!it.ssNext }));
+  const sess = a.items.map(it => syncItem({ ex: it.ex, sets: it.sets.filter(isWork).length, lo: it.lo, hi: it.hi, rir: it.rir, rest: it.rest, ssNext: !!it.ssNext, setsT: it.sets.filter(isWork).map(q => ({ type: q.type, lo: q.noRange ? null : T(it, q, 'lo'), hi: q.noRange ? null : T(it, q, 'hi'), rir: T(it, q, 'rir'), rest: T(it, q, 'rest') })) }));
   const changed = !!plan && JSON.stringify(plan.items.map(x => [x.ex, x.sets])) !== JSON.stringify(sess.map(x => [x.ex, x.sets]));
   ui.done = { entry, records, changed, sess, dayIdx: a.dayIdx }; ui.screen = 'complete'; ui.sheet = null; ui.focus = null;
 }
@@ -357,21 +371,34 @@ function muscleSets(from, to) {
   const out = Object.fromEntries(MUSCLES.map(m => [m, 0]));
   S.history.filter(h => h.start >= from && h.start < to).forEach(h => h.items.forEach(it => {
     const ex = exById(it.ex), n = it.sets.filter(isWork).length;
+    if (ex.w) { Object.entries(ex.w).forEach(([m, k]) => { if (m in out) out[m] += n * k; }); return; }
     if (ex.muscle in out) out[ex.muscle] += n;
     (ex.sec || []).forEach(m => { if (m in out) out[m] += n / 2; });
   }));
   return out;
 }
 // Progress inside the current program cycle. "All Workouts" also counts workouts outside the program.
+// The cycle remembers which days of the program are done. When all are done, the next cycle starts.
+function cyc() {
+  if (!S.cycle) { const days = S.program ? S.program.days : [], hs = S.history.filter(h => h.prog), n = days.length, cur = n ? hs.slice(hs.length - (hs.length % n)) : [];
+    S.cycle = { n: n ? Math.floor(hs.length / n) + 1 : 1, start: cur.length ? cur[0].start : Date.now(), done: {} };
+    cur.forEach(h => { if (days[h.dayIdx]) S.cycle.done[days[h.dayIdx].id] = true; }); }
+  return S.cycle;
+}
+const newCycle = n => { S.cycle = { n: n || 1, start: Date.now(), done: {} }; S.nextDay = 0; };
+function markDay(dayIdx, done) {
+  const days = S.program.days, c = cyc(); if (!days[dayIdx]) return;
+  if (done) c.done[days[dayIdx].id] = true; else delete c.done[days[dayIdx].id];
+  if (days.every(d => c.done[d.id])) { newCycle(c.n + 1); toast('Cycle complete. Cycle ' + S.cycle.n + ' starts.'); return; }
+  const next = days.findIndex(d => !c.done[d.id]); S.nextDay = next < 0 ? 0 : next;
+}
 function cycleProgress() {
-  const n = S.program ? S.program.days.length : 0, progHs = S.history.filter(h => h.prog);
-  const inCycle = n ? progHs.slice(progHs.length - (progHs.length % n)) : [];
-  const from = inCycle.length ? inCycle[0].start : Date.now();
-  const hs = ui.dashMode === 'all' ? S.history.filter(h => h.start >= from) : inCycle;
+  const c = cyc(), days = (S.program ? S.program.days : []).filter(d => !d.rest);
+  const hs = S.history.filter(h => h.start >= c.start && (ui.dashMode === 'all' || h.prog));
   const muscles = new Set(), exs = new Set(); let sets = 0;
   hs.forEach(h => h.items.forEach(it => { exs.add(it.ex); muscles.add(exById(it.ex).muscle); sets += it.sets.filter(isWork).length; }));
   const t = { muscles: new Set(), exs: new Set(), sets: 0 };
-  (S.program ? S.program.days : []).forEach(d => d.items.forEach(it => { t.exs.add(it.ex); t.muscles.add(exById(it.ex).muscle); t.sets += it.sets; }));
+  days.forEach(d => d.items.forEach(it => { t.exs.add(it.ex); t.muscles.add(exById(it.ex).muscle); t.sets += it.sets; }));
   return { muscles: [muscles.size, t.muscles.size], sets: [sets, t.sets], exs: [exs.size, t.exs.size] };
 }
 // Best recent result per exercise, for the Recent Records page.
@@ -393,11 +420,8 @@ function lineSvg(vals, cls) {
   const pts = vals.map((v, i) => [6 + i * (128 / (vals.length - 1)), hi === lo ? 21 : 34 - ((v - lo) / sp) * 26]);
   return `<svg class="spark ${cls}" viewBox="0 0 140 42"><polyline points="${pts.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ')}"/>${pts.map(p => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3"/>`).join('')}</svg>`;
 }
-const cycleNo = () => (S.program && S.program.days.length ? Math.floor(S.history.filter(h => h.prog).length / S.program.days.length) + 1 : 1);
-function doneThisCycle(dayIdx) {
-  const n = S.program.days.length, hs = S.history.filter(h => h.prog);
-  return hs.slice(hs.length - (hs.length % n)).some(h => h.dayIdx === dayIdx);
-}
+const cycleNo = () => cyc().n;
+const doneThisCycle = dayIdx => !!(S.program && S.program.days[dayIdx] && cyc().done[S.program.days[dayIdx].id]);
 
 // ---------- Screens ----------
 function render() {
@@ -517,7 +541,9 @@ function viewWorkout() {
     strip = rows.join('');
   }
   const p = S.program;
-  const row = (d, i) => { const done = doneThisCycle(i); return `<button class="wrow ${done ? 'dimmed' : ''}" data-act="daySheet" data-i="${i}">
+  const row = (d, i) => { const done = doneThisCycle(i);
+    if (d.rest) return `<button class="wrow restrow ${done ? 'dimmed' : ''}" data-act="restToggle" data-i="${i}" aria-pressed="${done}"><div><b>Rest Day</b></div><span class="box ${done ? 'on' : ''}">${done ? I.check : ''}</span></button>`;
+    return `<button class="wrow ${done ? 'dimmed' : ''}" data-act="daySheet" data-i="${i}">
     <div><b>${esc(d.name)}</b>
     <p>${d.items.length ? esc(d.items.map(it => exById(it.ex).name).join(', ')) : 'No exercises yet'}</p>
     ${chips(d.items.map(it => it.ex))}</div>
@@ -529,7 +555,7 @@ function viewWorkout() {
       <div class="h2row"><h2>Active Program</h2>${p ? `<span class="link">Cycle ${cycleNo()}</span>` : ''}</div>
       ${p ? `<div class="card prog">
         <div class="prog-head"><span class="sq amber">${I.puzzle}</span>
-          <button class="grow" data-act="editProgram"><b>${esc(p.name)}</b><span>${p.days.length} workouts</span></button>
+          <button class="grow" data-act="editProgram"><b>${esc(p.name)}</b><span>${p.days.filter(d => !d.rest).length} workouts</span></button>
           <button class="ic" data-act="toggleProg" aria-label="Collapse">${ui.progOpen ? I.up : I.down}</button></div>
         ${ui.progOpen ? p.days.map(row).join('') : ''}
       </div>` : `<div class="card empty"><p class="muted">No active program. Pick one from the library below.</p></div>`}
@@ -551,7 +577,7 @@ function viewProgram() {
   const p = S.program; ui.day = Math.min(ui.day, p.days.length - 1);
   const d = p.days[ui.day];
   const tm = {};
-  (ui.tmCycle ? p.days : [d]).forEach(x => x.items.forEach(it => { const e = exById(it.ex); [e.muscle, ...(e.sec || [])].forEach(m => { tm[m] = tm[m] || { ex: 0, sets: 0 }; tm[m].ex++; tm[m].sets += it.sets; }); }));
+  (ui.tmCycle ? p.days : [d]).forEach(x => x.items.forEach(it => { const e = exById(it.ex); [e.muscle, ...(e.sec || [])].filter(m => MUSCLES.includes(m)).forEach(m => { tm[m] = tm[m] || { ex: 0, sets: 0 }; tm[m].ex++; tm[m].sets += it.sets; }); }));
   return `<header class="bar"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>${esc(p.name)}</h1><button class="ic" data-act="progMenu" aria-label="Program options">${I.sliders}</button></header>
     <div class="tabsrow" data-keep="days">${p.days.map((x, i) => `<button data-act="day" data-i="${i}" aria-selected="${i === ui.day}">${esc(x.name)}</button>`).join('')}<button data-act="addDay" aria-label="Add workout">+</button></div>
     <div class="pills" data-keep="ppills">
@@ -569,16 +595,16 @@ function viewProgram() {
     ${d.items.map((it, i) => { const e = exById(it.ex); return `<section class="pex">
       <div class="pex-head">${thumb(it.ex, 'tall')}<div class="grow"><b>${esc(e.name)}</b>${it.ssNext ? '<em class="sstag">Superset with next</em>' : ''}${chipsEx(it.ex)}</div><button class="ic" data-act="itemMenu" data-i="${i}" aria-label="Options for ${esc(e.name)}">${I.dots}</button></div>
       <button class="wk" data-act="itemEdit" data-i="${i}"><b>1 Cycle</b>
-        ${Array.from({ length: it.sets }, (_, k) => `<span><i class="n">${k + 1}</i>${it.lo}-${it.hi} reps ${rirBadge(it.rir)}</span>`).join('')}</button>
+        ${setRows(it).map((q, k) => `<span><i class="n">${k + 1}</i>${q.lo != null ? q.lo + '-' + q.hi + ' reps' : TYPE_NAMES[q.type] || 'Set'}${q.type !== 'n' && q.lo != null ? ' <em class="stype">' + (TYPE_NAMES[q.type] || '').replace(' Set', '') + '</em>' : ''} ${rirBadge(q.rir != null ? q.rir : it.rir)}</span>`).join('')}</button>
       <button class="wk note" data-act="itemEdit" data-i="${i}"><b>Rest Timer</b><span>${clock(it.rest)}</span></button>
     </section>`; }).join('')}`;
 }
 
-const estMin = d => Math.round(d.items.reduce((n, it) => n + it.sets * (it.rest + 40), 0) / 60);
+const estMin = d => Math.round(d.items.reduce((n, it) => n + setRows(it).reduce((x, q) => x + (q.rest != null ? q.rest : it.rest) + 130, 0), 0) / 60);
 function viewPreview() {
   const p = S.program; ui.pv = Math.min(ui.pv, p.days.length - 1);
   const d = p.days[ui.pv], tm = {};
-  d.items.forEach(it => { const e = exById(it.ex); [e.muscle, ...(e.sec || [])].forEach(m => { tm[m] = tm[m] || { ex: 0, sets: 0 }; tm[m].ex++; tm[m].sets += it.sets; }); });
+  d.items.forEach(it => { const e = exById(it.ex); [e.muscle, ...(e.sec || [])].filter(m => MUSCLES.includes(m)).forEach(m => { tm[m] = tm[m] || { ex: 0, sets: 0 }; tm[m].ex++; tm[m].sets += it.sets; }); });
   return `<header class="bar three"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>${esc(d.name)}</h1><span><button class="ic" data-act="sheet" data-type="gyms" aria-label="Gym profiles">${I.gym}</button><button class="ic" data-act="editProgram" data-i="${ui.pv}" aria-label="Edit workout">${I.dots}</button></span></header>
     <section class="pad">
       <h2>Target Muscles</h2>
@@ -586,7 +612,7 @@ function viewPreview() {
       <div class="h2row"><div><h2>${d.items.length} Exercises</h2><p class="muted">Estimated workout time is ${estMin(d)} min</p></div><button class="hbtn big" data-act="editProgram" data-i="${ui.pv}" aria-label="Add exercises">${I.plus}</button></div>
     </section>
     ${d.items.map(it => { const e = exById(it.ex); return `<div class="pvrow">${thumb(it.ex, 'pv')}<div class="grow"><b>${esc(e.name)}</b>${it.ssNext ? '<em class="sstag">Superset with next</em>' : ''}
-      ${Array.from({ length: it.sets }, (_, k) => `<span><i class="n">${k + 1}</i>${it.lo}-${it.hi} reps ${rirBadge(it.rir)}</span>`).join('')}${chipsEx(it.ex)}</div></div>`; }).join('')}
+      ${setRows(it).map((q, k) => `<span><i class="n">${k + 1}</i>${q.lo != null ? q.lo + '-' + q.hi + ' reps' : TYPE_NAMES[q.type] || 'Set'}${q.type !== 'n' && q.lo != null ? ' <em class="stype">' + (TYPE_NAMES[q.type] || '').replace(' Set', '') + '</em>' : ''} ${rirBadge(q.rir != null ? q.rir : it.rir)}</span>`).join('')}${chipsEx(it.ex)}</div></div>`; }).join('')}
     <div class="startbar"><button class="btn primary" data-act="start" data-i="${ui.pv}">${S.active ? 'Resume Workout' : 'Start Workout'}</button></div>`;
 }
 
@@ -620,7 +646,7 @@ function viewActive() {
         let mid = '-';
         if (s.type === 'w') mid = 'Warm Up';
         else if (ui.colMode === 'prev') mid = s.prev ? `${s.prev.w ? kg(s.prev.w) + ' kg x ' : ''}${s.prev.r}${s.prev.rir != null ? `<small>${s.prev.rir} RIR</small>` : ''}` : '-';
-        else mid = `${s.tw ? kg(s.tw) + ' kg x ' + s.tr + '+' : T(it, s, 'lo') + '-' + T(it, s, 'hi') + ' reps'}<small>${T(it, s, 'rir')} RIR</small>`;
+        else mid = `${s.tw && !s.noRange ? kg(s.tw) + ' kg x ' + s.tr + '+' : s.noRange ? TYPE_NAMES[s.type] || 'Set' : T(it, s, 'lo') + '-' + T(it, s, 'hi') + ' reps'}<small>${s.type !== 'n' && !s.noRange ? (TYPE_NAMES[s.type] || '').replace(' Set', '') + ' • ' : ''}${T(it, s, 'rir')} RIR</small>`;
         const f = ui.focus && ui.focus.s === j ? ui.focus.f : null;
         return `<div class="row ${s.done ? 'done' : ''}">
           <button class="num" data-act="setMenu" data-s="${j}" aria-label="Set options">${label}</button>
@@ -823,7 +849,7 @@ function viewExLib() {
   const tab = ui.libTab || 'all', q = (ui.libQ || '').toLowerCase(), mus = ui.libMuscle || 'All';
   const done = new Set(S.history.flatMap(h => h.items.map(i => i.ex)));
   const inTab = e => tab === 'all' || (tab === 'performed' && done.has(e.id)) || (tab === 'depri' && exMod(e.id).depri) || (tab === 'modified' && (exMod(e.id).inc != null || String(e.id).startsWith('c-')));
-  const list = allEx().map(fixEx).filter(e => inTab(e) && (mus === 'All' || e.muscle === mus || (e.sec || []).includes(mus)) && e.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+  const list = listEx().map(fixEx).filter(e => inTab(e) && (mus === 'All' || e.muscle === mus || (e.sec || []).includes(mus)) && e.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
   const row = e => `<button class="pk" data-act="exDetail" data-ex="${esc(e.id)}">${thumb(e.id, 'tall')}<div><b>${esc(e.name)}</b><span>${e.muscle}${(e.sec || []).length ? ' • ' + e.sec.join(', ') : ''}</span>${done.has(e.id) ? `<span>Performed ${S.history.filter(h => h.items.some(i => i.ex === e.id)).length} time${S.history.filter(h => h.items.some(i => i.ex === e.id)).length === 1 ? '' : 's'}</span>` : ''}</div>${I.right}</button>`;
   return `<header class="bar"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>Exercises</h1><button class="ic" data-act="newExSheet" aria-label="Custom exercise">${I.plus}</button></header>
     <div class="tabsrow" data-keep="libtabs">${[['all', 'All'], ['performed', 'Performed'], ['depri', 'Deprioritized'], ['modified', 'Modified']].map(([k, l]) => `<button data-act="libTab" data-t="${k}" aria-selected="${tab === k}">${l}</button>`).join('')}</div>
@@ -847,7 +873,7 @@ function viewMore() {
       <h2>Theme</h2>
       <div class="themes">${tile('light', 'Light')}${tile('dark', 'Dark')}${tile('system', 'System')}</div>
       <h2>Data Management</h2>
-      <div class="card rows">${mrow('export', I.down, 'Data Export')}<label class="mrow">${I.up}<span>Data Import</span>${I.right}<input type="file" accept="application/json,.json" data-bind="import" hidden></label>${mrow('wipe', I.trash, 'Delete All Data')}</div>
+      <div class="card rows">${mrow('sheet', I.info, 'Import Exercise Database', 'data-type="exImport"')}${mrow('export', I.down, 'Data Export')}<label class="mrow">${I.up}<span>Data Import</span>${I.right}<input type="file" accept="application/json,.json" data-bind="import" hidden></label>${mrow('wipe', I.trash, 'Delete All Data')}</div>
       <h2>Other</h2>
       <div class="card rows">${mrow('open', I.cal, 'Workout History', 'data-screen="history"')}${mrow('sheet', I.info, 'About', 'data-type="about"')}</div>
       <p class="muted center">Version 1.0 · Data lives only on this phone</p>
@@ -885,7 +911,7 @@ function viewSheet() {
   if (m.type === 'setMenu') return `<h2>Set Type</h2>${opt('setType', I.workout, 'Standard Set', `data-s="${m.s}" data-t="n"`)}${opt('setType', I.warm, 'Warm Up', `data-s="${m.s}" data-t="w"`)}${opt('delSet', I.trash, 'Delete Set', `data-s="${m.s}"`)}`;
   if (m.type === 'info') { const it = S.active.items[ui.cur], ex = exById(it.ex), rec = recordFor(ex.id), tab = ui.infoTab;
     const past = S.history.slice().reverse().map(h => ({ h, x: h.items.find(q => q.ex === ex.id) })).filter(p => p.x);
-    const body1 = tab === 'inst' ? `<div class="media">${thumb(ex.id, 'hero')}</div>
+    const body1 = tab === 'inst' ? `<div class="media">${thumb(ex.id, 'hero')}</div>${ex.url ? `<a class="btn video" href="${esc(ex.url)}" target="_blank" rel="noopener">${I.play}Watch Video</a>` : ''}
         <div class="h2row first"><h2>Setting up</h2></div><p class="muted">${CUES[ex.equip][0]}</p>
         <h2>Performing</h2><p class="muted">${CUES[ex.equip][1]}</p>`
       : tab === 'det' ? `<h2>Target Muscles</h2><div class="hscroll">${[[ex.muscle, 'Primary'], ...(ex.sec || []).map(x => [x, 'Secondary'])].map(([mm, k]) => `<div class="mcard">${miniBody(mm)}<div><b>${mm}</b><span>${k}</span></div></div>`).join('')}</div>
@@ -900,15 +926,32 @@ function viewSheet() {
   if (m.type === 'superset') { const last = ui.cur >= S.active.items.length - 1, it = S.active.items[ui.cur];
     return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Superset</h2><span></span></div>
       <label class="field switch tsw first"><span><b>Superset with next</b>${last ? 'This is the last exercise of the workout.' : 'Alternate sets with ' + esc(exById(S.active.items[ui.cur + 1].ex).name) + ' and rest after both.'}</span><input type="checkbox" data-bind="ssNext" ${it.ssNext ? 'checked' : ''} ${last ? 'disabled' : ''}></label>`; }
+  if (m.type === 'exImport') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Exercise Database</h2><span></span></div>
+      <p class="muted">${(S.userLib || []).length ? `${S.userLib.length} exercises of yours are loaded.` : 'Load your own exercises: name, video link, equipment and muscles.'}</p>
+      <label class="btn primary">Choose Spreadsheet (.xlsx)<input type="file" accept=".xlsx" data-bind="exFile" hidden></label>
+      <label class="field">Or paste the table here<textarea id="exPaste" rows="4" placeholder="Copy the rows in your sheet and paste them here"></textarea></label>
+      <button class="btn" data-act="exPaste">Read Pasted Table</button>
+      ${(S.userLib || []).length ? `<button class="btn danger" data-act="exClear">Remove My Database</button>` : ''}`;
+  if (m.type === 'exPreview') { const l = m.list, by = {}; l.forEach(e => { by[e.muscle] = (by[e.muscle] || 0) + 1; });
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Exercise Database</h2><span></span></div>
+      <div class="card list"><div><span>Exercises</span><b>${l.length}</b></div><div><span>With video</span><b>${l.filter(e => e.url).length}</b></div><div><span>Repeated or empty rows skipped</span><b>${m.skipped}</b></div></div>
+      <div class="chips wrap">${Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<span>${k} ${n}</span>`).join('')}</div>
+      <button class="btn primary" data-act="exAccept">Use These ${l.length} Exercises</button><button class="btn" data-act="close">Cancel</button>`; }
+  if (m.type === 'progPreview') { const pr = m.prog, st = pr.stats;
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Import Program</h2><span></span></div>
+      <h3 class="subh">${esc(pr.name)}</h3>
+      <div class="card list"><div><span>Workouts</span><b>${st.workouts}</b></div><div><span>Rest days</span><b>${st.rests}</b></div><div><span>Sets</span><b>${st.sets}</b></div><div><span>Exercises</span><b>${st.exercises}</b></div><div><span>New exercises to create</span><b>${m.fresh.length}</b></div></div>
+      ${m.fresh.length ? `<h3 class="subh">New exercises</h3><p class="muted">Muscle and equipment are guessed from the name. You can fix them later in Exercises.</p><div class="card list scrolly">${m.fresh.map(e => `<div><span>${esc(e.name)}</span><b>${e.muscle} · ${e.equip}</b></div>`).join('')}</div>` : ''}
+      <button class="btn primary" data-act="progAccept">Set as Active Program</button><button class="btn" data-act="close">Cancel</button>`; }
   if (m.type === 'wmore') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>More</h2><span></span></div>
-      <div class="srows">${mrow('startFree', I.enter, 'Start Empty Workout')}${mrow('open', I.hist, 'Workout History', 'data-screen="history"')}${mrow('sheet', I.sliders, 'Customize Sections', 'data-type="sections"')}${S.program ? mrow('progMenu', I.edit, 'Edit Program') : ''}<div class="mrow">${I.gym}<span>Archive<small>Archive is empty</small></span>${I.right}</div></div>`;
+      <div class="srows">${mrow('startFree', I.enter, 'Start Empty Workout')}<label class="mrow">${I.up}<span>Import Program<small>From a spreadsheet (.xlsx)</small></span>${I.right}<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" data-bind="progFile" hidden></label>${mrow('open', I.hist, 'Workout History', 'data-screen="history"')}${mrow('sheet', I.sliders, 'Customize Sections', 'data-type="sections"')}${S.program ? mrow('progMenu', I.edit, 'Edit Program') : ''}<div class="mrow">${I.gym}<span>Archive<small>Archive is empty</small></span>${I.right}</div></div>`;
   if (m.type === 'sections') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Customize Sections</h2><span></span></div>
       <label class="field switch tsw first"><span><b>Active Program</b>Show your current program on the Workout tab</span><input type="checkbox" checked disabled></label>
       <label class="field switch tsw"><span><b>Workout Library</b>Show the starter programs under your active program</span><input type="checkbox" data-bind="showLib" ${S.settings.hideLib ? '' : 'checked'}></label>
       <button class="btn primary" data-act="close">Done</button>`;
   if (m.type === 'swap') { const it = S.active.items[ui.cur], ex = exById(it.ex);
     const line = e => `${e.muscle}${(e.sec || []).length ? ' • ' + e.sec.join(', ') : ''}`;
-    const subs = allEx().map(fixEx).filter(e => e.id !== ex.id && e.muscle === ex.muscle && !exMod(e.id).depri).sort((a, b) => (b.equip === ex.equip) - (a.equip === ex.equip) || a.name.localeCompare(b.name)).slice(0, 6);
+    const subs = listEx().map(fixEx).filter(e => e.id !== ex.id && e.muscle === ex.muscle && !exMod(e.id).depri).sort((a, b) => (b.equip === ex.equip) - (a.equip === ex.equip) || a.name.localeCompare(b.name)).slice(0, 6);
     return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Swap</h2><span></span></div>
       <div class="pk cur">${thumb(ex.id, 'tall')}<div><b>${esc(ex.name)}</b><span>${line(ex)}</span></div></div>
       <h3 class="subh">Smart Substitutions</h3>
@@ -946,8 +989,13 @@ function viewSheet() {
     <label class="field">Equipment<select id="nxEquip">${Object.keys(EQUIP_GLYPH).map(x => `<option>${x}</option>`).join('')}</select></label>
     <label class="field">Weight step (kg)<input id="nxInc" inputmode="decimal" value="2.5"></label>
     <button class="btn primary" data-act="saveEx">Save</button>`;
-  if (m.type === 'itemEdit') { const it = S.program.days[ui.day].items[m.i];
-    return `<h2>${esc(exById(it.ex).name)}</h2><div class="grid5">${[['sets', 'Sets'], ['lo', 'Min reps'], ['hi', 'Max reps'], ['rir', 'RIR'], ['rest', 'Rest (sec)']].map(([f, l]) => `<label>${l}<input inputmode="numeric" data-bind="pitem" data-i="${m.i}" data-f="${f}" value="${it[f]}"></label>`).join('')}</div>
+  if (m.type === 'itemEdit') { const it = S.program.days[ui.day].items[m.i]; if (!it.setsT || !it.setsT.length) it.setsT = setRows(it).map(q => ({ ...q }));
+    const cell = (j, f, v) => `<input inputmode="numeric" data-bind="pset" data-i="${m.i}" data-s="${j}" data-f="${f}" value="${v != null ? v : ''}" aria-label="${f}">`;
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>${esc(exById(it.ex).name)}</h2><span></span></div>
+      <div class="ttable"><div class="trow head"><span>Set</span><span>Reps Min</span><span>Reps Max</span><span>Rest</span><span>RIR</span></div>
+      ${it.setsT.map((q, j) => `<div class="trow"><button class="num" data-act="psetType" data-i="${m.i}" data-s="${j}" aria-label="${TYPE_NAMES[q.type] || 'Standard Set'}. Tap to change.">${{ w: 'W', f: 'F', d: 'D', m: 'M' }[q.type] || j + 1}</button>${cell(j, 'lo', q.lo)}${cell(j, 'hi', q.hi)}${cell(j, 'rest', q.rest != null ? q.rest : it.rest)}<button data-act="psetRir" data-i="${m.i}" data-s="${j}" aria-label="Change RIR">${rirBadge(q.rir != null ? q.rir : it.rir)}</button></div>`).join('')}
+      <div class="row2"><button class="num add" data-act="psetAdd" data-i="${m.i}" aria-label="Add set">${I.plus}</button>${it.setsT.length > 1 ? `<button class="num add" data-act="psetDel" data-i="${m.i}" aria-label="Remove last set">${I.minus}</button>` : ''}</div></div>
+      <label class="field">Program Note<textarea data-bind="pnote" data-i="${m.i}" rows="2" maxlength="300" placeholder="Note for this exercise">${esc(it.note || '')}</textarea></label>
       <button class="btn primary" data-act="close">Done</button>`; }
   if (m.type === 'itemMenu') return `<h2>${esc(exById(S.program.days[ui.day].items[m.i].ex).name)}</h2>${opt('itemEdit', I.edit, 'Edit Sets', `data-i="${m.i}"`)}${opt('itemSs', I.sort, S.program.days[ui.day].items[m.i].ssNext ? 'Remove Superset' : 'Superset with next', `data-i="${m.i}"`)}${opt('moveItem', I.up, 'Move Up', `data-i="${m.i}" data-dir="-1"`)}${opt('moveItem', I.down, 'Move Down', `data-i="${m.i}" data-dir="1"`)}${opt('delItem', I.trash, 'Remove Exercise', `data-i="${m.i}"`)}`;
   if (m.type === 'reorder') return `<h2>Re-order</h2>${S.program.days[ui.day].items.map((it, i) => `<div class="opt"><span class="grow">${esc(exById(it.ex).name)}</span><button class="ic" data-act="moveKeep" data-i="${i}" data-dir="-1" aria-label="Move up">${I.up}</button><button class="ic" data-act="moveKeep" data-i="${i}" data-dir="1" aria-label="Move down">${I.down}</button></div>`).join('')}<button class="btn primary" data-act="close">Done</button>`;
@@ -964,11 +1012,11 @@ function viewSheet() {
   if (m.type === 'about') return `<h2>About</h2><p class="muted">Hierro is a personal strength training log. Everything you enter stays on this phone.</p><div class="card list"><div><span>Workouts logged</span><b>${S.history.length}</b></div><div><span>Exercises</span><b>${allEx().length}</b></div></div><button class="btn primary" data-act="close">Done</button>`;
   if (m.type === 'exdetail') { const ex = exById(m.ex), rec = recordFor(ex.id), past = S.history.slice().reverse().map(h => ({ h, x: h.items.find(q => q.ex === ex.id) })).filter(p => p.x).slice(0, 8);
     return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>${esc(ex.name)}</h2><span></span></div>
-      <div class="media small">${thumb(ex.id, 'hero')}</div>
+      <div class="media small">${thumb(ex.id, 'hero')}</div>${ex.url ? `<a class="btn video" href="${esc(ex.url)}" target="_blank" rel="noopener">${I.play}Watch Video</a>` : ''}
       <h3 class="subh">Target Muscles</h3><div class="hscroll">${[[ex.muscle, 'Primary'], ...(ex.sec || []).map(x => [x, 'Secondary'])].map(([mm, k]) => `<div class="mcard">${miniBody(mm)}<div><b>${mm}</b><span>${k}</span></div></div>`).join('')}</div>
       <h3 class="subh">Properties</h3>
       <div class="card rows">
-        <div class="mrow srow">${I.gym}<span><b>Resistance Equipment</b>${ex.equip}</span></div>
+        <div class="mrow srow">${I.gym}<span><b>Resistance Equipment</b>${esc(ex.mat || ex.equip)}</span></div>
         <label class="mrow srow">${I.plates}<span><b>Weight Step</b>${exMod(ex.id).inc != null ? 'Modified' : 'Default'}</span><input class="numin" inputmode="decimal" data-bind="exInc" data-ex="${esc(ex.id)}" value="${kg(ex.inc)}" aria-label="Weight step in kg"></label>
         <label class="mrow srow">${I.down}<span><b>Deprioritize</b>Leave it out of swap suggestions and list it last</span><input type="checkbox" data-bind="exDepri" data-ex="${esc(ex.id)}" ${exMod(ex.id).depri ? 'checked' : ''}></label>
       </div>
@@ -1026,11 +1074,27 @@ const GROUPS = [['Free Weights', ['Barbell', 'Dumbbell']], ['Machines', ['Machin
 function pickList() {
   const m = ui.sheet, q = (m.q || '').toLowerCase();
   const ok = e => (!m.muscle || m.muscle === 'All' || e.muscle === m.muscle || (e.sec || []).includes(m.muscle)) && (m.gymOnly === false || gym().equip[e.equip] !== false) && e.name.toLowerCase().includes(q);
-  const list = allEx().map(fixEx).filter(ok).sort((x, y) => (!!exMod(x.id).depri - !!exMod(y.id).depri) || x.name.localeCompare(y.name));
+  const list = listEx().map(fixEx).filter(ok).sort((x, y) => (!!exMod(x.id).depri - !!exMod(y.id).depri) || x.name.localeCompare(y.name));
   const row = e => `<div class="pk">${thumb(e.id, 'tall')}<div><b>${esc(e.name)}</b><span>${e.muscle}${(e.sec || []).length ? ' • ' + e.sec.join(', ') : ''}</span></div><button class="hbtn" data-act="choose" data-ex="${esc(e.id)}" aria-label="Add ${esc(e.name)}">${I.plus}</button></div>`;
   return GROUPS.map(([title, eqs]) => { const g = list.filter(e => eqs.includes(e.equip)); if (!g.length) return ''; const open = m.open === title || q || g.length <= 4;
     return `<div class="h2row psec"><h3>${title}</h3>${g.length > 4 ? `<button class="link" data-act="pickOpen" data-g="${title}">${open && !q ? 'See Less' : `See ${g.length - 4} More`}</button>` : ''}</div>${(open ? g : g.slice(0, 4)).map(row).join('')}`; }).join('')
     || '<p class="muted">No match. Use + at the top to create it.</p>';
+}
+
+// Matches every exercise of an imported program to one we know; the rest become new custom exercises.
+function matchProgram(prog) {
+  const known = {}; allEx().forEach(e => { known[norm(e.name)] = e.id; });
+  (S.userLib || []).concat(S.custom).forEach(e => { known[norm(e.name)] = e.id; });
+  const fresh = {};
+  prog.days.forEach(d => d.items.forEach(it => { const k = norm(it.name);
+    if (!known[k]) { const g = guessExercise(it.name, it.note); fresh[k] = { id: 'c-' + uid(), name: titleCase(it.name), ...g }; known[k] = fresh[k].id; }
+    it.exId = known[k]; }));
+  return Object.values(fresh);
+}
+async function readFile(el, then) {
+  const f = el.files && el.files[0]; el.value = ''; if (!f) return;
+  try { then(await readXlsx(await f.arrayBuffer())); save(); render(); }
+  catch (e) { console.error(e); toast('Could not read that file. It must be an .xlsx spreadsheet.'); }
 }
 
 // ---------- Actions ----------
@@ -1069,15 +1133,26 @@ const actions = {
   plusSheet() { ui.sheet = { type: 'plus' }; },
   toggleCal() { ui.cal = !ui.cal; },
   toggleProg() { ui.progOpen = !ui.progOpen; },
+  exPaste() { const t = document.getElementById('exPaste').value; const r = parseExerciseTable(parseTsv(t)); if (!r.list.length) return toast('No exercises found in that text.'); ui.sheet = { type: 'exPreview', list: r.list, skipped: r.skipped }; },
+  exAccept() { S.userLib = ui.sheet.list; close(); toast(S.userLib.length + ' exercises loaded.'); },
+  exClear() { if (confirm('Remove your exercise database? Programs and history that use it keep the ids but lose the names.')) { S.userLib = []; close(); } },
+  progAccept() {
+    if (S.active) return toast('Finish or discard the workout in progress first.');
+    if (S.program && !confirm(SWITCH)) return;
+    const m = ui.sheet; m.fresh.forEach(e => S.custom.push(e));
+    S.program = { name: m.prog.name, days: m.prog.days.map(d => ({ id: uid(), name: d.name, rest: !!d.rest, items: d.items.map(it => syncItem({ ex: it.exId, note: it.note, setsT: it.sets.map(q => ({ ...q })) })) })) };
+    newCycle(1); ui.lib = null; ui.progOpen = true; close(); ui.tab = 'workout'; ui.screen = null; window.scrollTo(0, 0); toast('Program imported.');
+  },
+  restToggle(d) { markDay(+d.i, !doneThisCycle(+d.i)); close(); },
   toggleLib(d) { ui.lib = ui.lib === +d.i ? null : +d.i; },
   daySheet(d) { ui.pv = +d.i; ui.screen = 'preview'; close(); window.scrollTo(0, 0); },
   useTemplate(d) {
     if (S.program && !confirm(SWITCH)) return;
-    const t = clone(TEMPLATES[d.i]); S.program = { name: t.name, days: t.days.map(x => ({ id: uid(), ...x })) }; S.nextDay = 0; ui.lib = null; ui.progOpen = true; window.scrollTo(0, 0);
+    const t = clone(TEMPLATES[d.i]); S.program = { name: t.name, days: t.days.map(x => ({ id: uid(), ...x })) }; newCycle(1); ui.lib = null; ui.progOpen = true; window.scrollTo(0, 0);
   },
   emptyProgram() {
     if (S.program && !confirm(SWITCH)) return;
-    S.program = { name: 'My Program', days: [{ id: uid(), name: 'Workout A', items: [] }] }; S.nextDay = 0; ui.day = 0; ui.screen = 'program'; close();
+    S.program = { name: 'My Program', days: [{ id: uid(), name: 'Workout A', items: [] }] }; newCycle(1); ui.day = 0; ui.screen = 'program'; close();
   },
   editProgram(d) { if (d.i != null) ui.day = +d.i; ui.screen = 'program'; close(); window.scrollTo(0, 0); },
   progMenu() { ui.sheet = { type: 'progMenu' }; },
@@ -1090,10 +1165,15 @@ const actions = {
   itemMenu(d) { ui.sheet = { type: 'itemMenu', i: +d.i }; },
   itemEdit(d) { ui.sheet = { type: 'itemEdit', i: +d.i }; },
   itemSs(d) { const arr = S.program.days[ui.day].items, it = arr[+d.i]; if (+d.i >= arr.length - 1 && !it.ssNext) { close(); return toast('There is no next exercise to pair with.'); } it.ssNext = !it.ssNext; close(); },
+  psetType(d) { const it = S.program.days[ui.day].items[+d.i], q = it.setsT[+d.s], o = ['n', 'f', 'd', 'm']; q.type = o[(o.indexOf(q.type) + 1) % o.length]; toast(TYPE_NAMES[q.type]); },
+  psetRir(d) { const it = S.program.days[ui.day].items[+d.i], q = it.setsT[+d.s]; q.rir = ((q.rir != null ? q.rir : it.rir) + 1) % 7; syncItem(it); },
+  psetAdd(d) { const it = S.program.days[ui.day].items[+d.i]; it.setsT.push({ ...it.setsT[it.setsT.length - 1] }); syncItem(it); },
+  psetDel(d) { const it = S.program.days[ui.day].items[+d.i]; if (it.setsT.length > 1) it.setsT.pop(); syncItem(it); },
   delItem(d) { S.program.days[ui.day].items.splice(+d.i, 1); close(); },
   moveItem(d) { actions.moveKeep(d); close(); },
   moveKeep(d) { const arr = S.program.days[ui.day].items, i = +d.i, j = i + +d.dir; if (j >= 0 && j < arr.length) [arr[i], arr[j]] = [arr[j], arr[i]]; },
-  start(d) { if (S.active) { ui.screen = 'active'; close(); return toast('A workout is already in progress.'); } startWorkout(+d.i); },
+  start(d) { if (S.program && S.program.days[+d.i] && S.program.days[+d.i].rest) { markDay(+d.i, true); close(); return toast('Rest day done.'); }
+    if (S.active) { ui.screen = 'active'; close(); return toast('A workout is already in progress.'); } startWorkout(+d.i); },
   startFree() { if (S.active) { ui.screen = 'active'; close(); return; } startWorkout(null); },
   resume() { ui.screen = 'active'; close(); },
   minimize() { ui.screen = null; ui.focus = null; close(); },
@@ -1217,6 +1297,10 @@ const binds = {
   exInc(el, d) { const n = num(el.value); if (n == null || n < 0) return; const m = S.exMods = S.exMods || {}; const base = fixEx(allEx().find(e => e.id === d.ex)); m[d.ex] = { ...(m[d.ex] || {}) }; if (base && base.inc === n) delete m[d.ex].inc; else m[d.ex].inc = n; },
   exDepri(el, d) { const m = S.exMods = S.exMods || {}; m[d.ex] = { ...(m[d.ex] || {}), depri: el.checked }; },
   libQ(el) { ui.libQ = el.value; render(); const i = document.querySelector('[data-bind=libQ]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } },
+  pset(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = S.program.days[ui.day].items[+d.i], q = it.setsT[+d.s]; q[d.f] = Math.round(n); if (q.hi != null && q.lo != null && q.hi < q.lo) q.hi = q.lo; syncItem(it); },
+  pnote(el, d) { S.program.days[ui.day].items[+d.i].note = el.value; },
+  progFile(el) { readFile(el, rows => { const prog = parseProgram(rows); if (!prog.stats.workouts) return toast('No workouts found in that spreadsheet.'); ui.sheet = { type: 'progPreview', prog, fresh: matchProgram(prog) }; }); },
+  exFile(el) { readFile(el, rows => { const r = parseExerciseTable(rows); if (!r.list.length) return toast('No exercises found in that spreadsheet.'); ui.sheet = { type: 'exPreview', list: r.list, skipped: r.skipped }; }); },
   flag(el, d) { S.settings[d.f] = el.checked; if (d.f === 'keepAwake') { if (el.checked) wake(); else if (lock) { try { lock.release(); } catch (e) { /* ya estaba suelto */ } lock = null; } } },
   planUp(el) { if (ui.done) ui.done.planUp = el.checked; },
   aitem(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(); it[d.f] = Math.round(n); if (it.hi < it.lo) it.hi = it.lo; },
@@ -1247,7 +1331,7 @@ const binds = {
 };
 function onField(e) {
   const el = e.target.closest('[data-bind]'); if (!el) return;
-  const b = el.dataset.bind, live = ['note', 'pickQ', 'progName', 'dayName', 'gymName', 'libQ'];
+  const b = el.dataset.bind, live = ['note', 'pickQ', 'progName', 'dayName', 'gymName', 'libQ', 'pnote'];
   if ((e.type === 'input') !== live.includes(b)) return;
   binds[b](el, el.dataset); save();
 }
