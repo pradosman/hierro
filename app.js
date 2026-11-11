@@ -382,12 +382,12 @@ function doneThisCycle(dayIdx) {
 function render() {
   const keep = [...document.querySelectorAll('[data-keep]')].map(el => [el.dataset.keep, el.scrollLeft]);
   const full = ui.screen;
-  const view = full ? { active: viewActive, complete: viewComplete, preview: viewPreview, wsettings: viewWSettings, weight: viewWeight, program: viewProgram, analytics: viewAnalytics, history: viewHistory }[full]
+  const view = full ? { active: viewActive, complete: viewComplete, preview: viewPreview, wsettings: viewWSettings, scsettings: viewScSettings, weight: viewWeight, program: viewProgram, analytics: viewAnalytics, history: viewHistory }[full]
     : { dash: viewDash, workout: viewWorkout, levels: viewLevels, more: viewMore }[ui.tab];
   const app = document.getElementById('view');
   app.className = full ? 'screen-' + full : 'tab-' + ui.tab;
   app.innerHTML = view();
-  document.getElementById('tabs').hidden = !!full && !['analytics', 'weight', 'wsettings'].includes(full);
+  document.getElementById('tabs').hidden = !!full && !['analytics', 'weight', 'wsettings', 'scsettings'].includes(full);
   document.querySelectorAll('#tabs [data-tab]').forEach(b => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
   const m = document.getElementById('modal');
   m.innerHTML = ui.sheet ? `<div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${viewSheet()}</div>` : '';
@@ -701,6 +701,26 @@ function viewHistory() {
 }
 
 const mrow = (act, icon, label, extra = '', right = I.right) => `<button class="mrow" data-act="${act}" ${extra}>${icon}<span>${label}</span>${right}</button>`;
+const SC_DEFS = {
+  weight: ['sheet', 'scale', 'Weight', 'data-type="weight"'], levels: ['tab', 'levels', 'Levels', 'data-tab="levels"'], gym: ['sheet', 'gym', 'Gym', 'data-type="gyms"'], history: ['open', 'hist', 'History', 'data-screen="history"'],
+  empty: ['startFree', 'enter', 'Empty Workout', ''], program: ['emptyProgram', 'route', 'New Program', ''], workout: ['addDay', 'workout', 'New Workout', ''], exercise: ['newExSheet', 'plus', 'Custom Exercise', ''],
+};
+const SC_COLORS = ['', 'var(--blue)', 'var(--coral)', 'var(--amber)', 'var(--green)', 'var(--violet)'];
+function scOrder() { const all = Object.keys(SC_DEFS), saved = (S.settings.scOrder || []).filter(k => SC_DEFS[k]); return saved.concat(all.filter(k => !saved.includes(k))); }
+const scTint = k => { const c = SC_COLORS[(S.settings.scColor || {})[k] || 0]; return c ? `style="background:${c};color:#fff"` : ''; };
+function viewScSettings() {
+  const order = scOrder(), mode = ui.scMode || 'order', nd = S.program && S.program.days.length ? S.program.days[Math.min(S.nextDay, S.program.days.length - 1)] : null;
+  return `<header class="bar"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>Shortcuts</h1><button class="ic savebtn" data-act="closeScreen">Save</button></header>
+    <section class="pad">
+      <h2>Up Next Banner</h2>
+      <label class="upnext bannerrow"><div><b>Up Next${nd ? ' • ' + esc(nd.name) : ''}</b><p>${nd ? esc(nd.items.map(it => exById(it.ex).name).join(', ')) : 'Shows the next workout of your program'}</p></div><input type="checkbox" class="swc" data-bind="flag" data-f="scUpNext" ${S.settings.scUpNext === false ? '' : 'checked'}></label>
+      <div class="h2row"><h2>Shortcuts</h2><div class="seg mini"><button data-act="scMode" data-v="order" aria-pressed="${mode === 'order'}">Order</button><button data-act="scMode" data-v="color" aria-pressed="${mode === 'color'}">Color</button></div></div>
+      <div class="card rows">${order.map((k, i) => { const [, icon, label] = SC_DEFS[k];
+        return `<div class="mrow srow"><i class="scico" ${scTint(k)}>${I[icon]}</i><span><b>${label}</b>${i < 4 ? 'Top Shortcut' : 'List Shortcut'}</span>${mode === 'order'
+          ? `<button class="ic" data-act="scMove" data-k="${k}" data-dir="-1" aria-label="Move ${label} up">${I.up}</button><button class="ic" data-act="scMove" data-k="${k}" data-dir="1" aria-label="Move ${label} down">${I.down}</button>`
+          : `<button class="editbtn" data-act="scColor" data-k="${k}">Color</button>`}</div>`; }).join('')}</div>
+    </section>`;
+}
 const sw = (f, icon, title, text, def = true) => `<label class="mrow srow">${icon}<span><b>${title}</b>${text}</span><input type="checkbox" data-bind="flag" data-f="${f}" ${(S.settings[f] === undefined ? def : S.settings[f]) ? 'checked' : ''}></label>`;
 const nav = (act, icon, title, text, extra = '') => `<button class="mrow srow" data-act="${act}" ${extra}>${icon}<span><b>${title}</b>${text}</span>${I.right}</button>`;
 function viewWSettings() {
@@ -777,7 +797,7 @@ function viewMore() {
       <h2>General</h2>
       <div class="card rows">${mrow('sheet', I.scale, 'Units', 'data-type="units"')}${mrow('sheet', I.timer, 'Rest Timer', 'data-type="rest"')}${mrow('sheet', I.globe, 'Language', 'data-type="about"', '<b class="val">English</b>')}</div>
       <h2>Feature Settings</h2>
-      <div class="card rows">${mrow('tab', I.dash, 'Dashboard', 'data-tab="dash"')}${mrow('open', I.workout, 'Workout', 'data-screen="wsettings"')}${mrow('plusSheet', I.plus, 'Shortcuts')}${mrow('open', I.scale, 'Weight Trend', 'data-screen="weight"')}${mrow('sheet', I.info, 'Exercises', 'data-type="exlib"')}${mrow('sheet', I.gym, 'Gym Profiles', 'data-type="gyms"')}</div>
+      <div class="card rows">${mrow('tab', I.dash, 'Dashboard', 'data-tab="dash"')}${mrow('open', I.workout, 'Workout', 'data-screen="wsettings"')}${mrow('open', I.plus, 'Shortcuts', 'data-screen="scsettings"')}${mrow('open', I.scale, 'Weight Trend', 'data-screen="weight"')}${mrow('sheet', I.info, 'Exercises', 'data-type="exlib"')}${mrow('sheet', I.gym, 'Gym Profiles', 'data-type="gyms"')}</div>
       <h2>Theme</h2>
       <div class="themes">${tile('light', 'Light')}${tile('dark', 'Dark')}${tile('system', 'System')}</div>
       <h2>Data Management</h2>
@@ -794,13 +814,13 @@ function viewSheet() {
   const m = ui.sheet;
   const nextIdx = S.program && S.program.days.length ? Math.min(S.nextDay, S.program.days.length - 1) : -1;
   if (m.type === 'plus') {
-    const sc = (act, icon, label, extra = '') => `<button data-act="${act}" ${extra}><i>${icon}</i>${label}</button>`;
-    const nd = nextIdx >= 0 ? S.program.days[nextIdx] : null;
-    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Shortcuts</h2><button class="ic" data-act="tab" data-tab="more" aria-label="Settings">${I.sliders}</button></div>
-      <div class="shortcuts">${sc('sheet', I.scale, 'Weight', 'data-type="weight"')}${sc('tab', I.levels, 'Levels', 'data-tab="levels"')}${sc('sheet', I.gym, 'Gym', 'data-type="equip"')}${sc('open', I.hist, 'History', 'data-screen="history"')}</div>
-      ${S.active ? `<button class="upnext" data-act="resume"><div><b>In Progress • ${esc(S.active.dayName)}</b><p>Tap to resume your workout</p></div>${I.right}</button>`
+    const order = scOrder().filter(k => k !== 'workout' || S.program), nd = nextIdx >= 0 ? S.program.days[nextIdx] : null;
+    const top = order.slice(0, 4), rest = order.slice(4);
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Shortcuts</h2><button class="ic" data-act="open" data-screen="scsettings" aria-label="Shortcut settings">${I.sliders}</button></div>
+      <div class="shortcuts">${top.map(k => { const [act, icon, label, extra] = SC_DEFS[k]; return `<button data-act="${act}" ${extra}><i ${scTint(k)}>${I[icon]}</i>${label}</button>`; }).join('')}</div>
+      ${S.settings.scUpNext === false ? '' : S.active ? `<button class="upnext" data-act="resume"><div><b>In Progress • ${esc(S.active.dayName)}</b><p>Tap to resume your workout</p></div>${I.right}</button>`
         : nd ? `<button class="upnext" data-act="daySheet" data-i="${nextIdx}"><div><b>Up Next • ${esc(nd.name)}</b><p>${esc(nd.items.map(it => exById(it.ex).name).join(', '))}</p>${chips(nd.items.map(it => it.ex))}</div>${I.right}</button>` : ''}
-      <div class="srows">${mrow('startFree', I.enter, 'Empty Workout')}${mrow('emptyProgram', I.route, 'New Program')}${S.program ? mrow('addDay', I.workout, 'New Workout') : ''}${mrow('newExSheet', I.plus, 'Custom Exercise')}</div>`;
+      <div class="srows">${rest.map(k => { const [act, icon, label, extra] = SC_DEFS[k]; return mrow(act, I[icon], label, extra); }).join('')}</div>`;
   }
   if (m.type === 'day') { const d = S.program.days[m.i]; return `<h2>${esc(d.name)}</h2><p class="muted">${d.items.length} exercises</p>
     <button class="btn primary" data-act="start" data-i="${m.i}">Start Workout</button><button class="btn" data-act="editProgram" data-i="${m.i}">Edit</button>`; }
@@ -957,6 +977,9 @@ const actions = {
   tmMode(d) { ui.tmCycle = !!d.v; },
   flip() { ui.back = !ui.back; },
   wRange(d) { ui.wRange = d.r; },
+  scMode(d) { ui.scMode = d.v; },
+  scMove(d) { const o = scOrder(), i = o.indexOf(d.k), j = i + +d.dir; if (j < 0 || j >= o.length) return; [o[i], o[j]] = [o[j], o[i]]; S.settings.scOrder = o; },
+  scColor(d) { const c = S.settings.scColor = S.settings.scColor || {}; c[d.k] = ((c[d.k] || 0) + 1) % SC_COLORS.length; },
   prevRef() { S.settings.prevRef = S.settings.prevRef === 'same' ? 'any' : 'same'; },
   weightSave() { const v = num(document.getElementById('wIn').value); if (!v || v <= 0) return toast('Enter your weight.'); const t0 = new Date().setHours(0, 0, 0, 0); S.weights = (S.weights || []).filter(w => !(w.t >= t0 && w.t < t0 + DAY)); S.weights.push({ t: Date.now(), kg: Math.round(v * 10) / 10 }); close(); toast('Weight saved.'); },
   weightDel() { const t0 = new Date().setHours(0, 0, 0, 0); S.weights = (S.weights || []).filter(w => !(w.t >= t0 && w.t < t0 + DAY)); close(); },
