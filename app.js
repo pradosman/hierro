@@ -424,7 +424,7 @@ const cycleNo = () => cyc().n;
 const doneThisCycle = dayIdx => !!(S.program && S.program.days[dayIdx] && cyc().done[S.program.days[dayIdx].id]);
 
 // ---------- Screens ----------
-function render() {
+function paint() {
   const keep = [...document.querySelectorAll('[data-keep]')].map(el => [el.dataset.keep, el.scrollLeft]);
   const full = ui.screen;
   const view = full ? { active: viewActive, complete: viewComplete, preview: viewPreview, wsettings: viewWSettings, scsettings: viewScSettings, dashcfg: viewDashCfg, exlib: viewExLib, weight: viewWeight, program: viewProgram, analytics: viewAnalytics, history: viewHistory }[full]
@@ -440,6 +440,127 @@ function render() {
   keep.forEach(([k, x]) => { const el = document.querySelector(`[data-keep="${k}"]`); if (el) el.scrollLeft = x; });
   tick();
 }
+
+// ---------- Motion ----------
+// Screens slide in from the right and slide back out. Sheets rise from the bottom and can be dragged down.
+// A screen can also be closed by dragging from the left edge.
+const EASE = 'cubic-bezier(.32,.72,0,1)', PUSH_MS = 380, SHEET_MS = 320;
+const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Runs fn once when the animation ends. A timer backs it up, because a page in the background never finishes its animations.
+function after(anim, ms, fn) { let done = false; const run = () => { if (done) return; done = true; fn(); }; anim.onfinish = run; setTimeout(run, ms + 90); return anim; }
+const depth = () => (ui.screen ? (ui.prev ? 2 : 1) : 0);
+const navState = { screen: ui.screen, tab: ui.tab, depth: depth(), sheet: !!ui.sheet, keys: false };
+const scrolls = [];
+let preScroll = 0, quiet = false;   // preScroll: where the page was before the action. quiet: draw with no movement.
+const SWIPE = ['preview', 'program', 'analytics', 'history', 'weight', 'wsettings', 'scsettings', 'dashcfg', 'exlib'];
+
+// A frozen copy of what is on screen now, fixed in place, to animate while the new screen is drawn underneath or on top.
+function ghost(el, top) {
+  const g = el.cloneNode(true); g.removeAttribute('id'); g.classList.add('ghost'); g.style.top = top + 'px';
+  g.querySelectorAll('.keypad, .startbar').forEach(x => x.remove());
+  document.body.appendChild(g); return g;
+}
+function render() {
+  const app = document.getElementById('view'), modal = document.getElementById('modal');
+  const still = quiet || calm(), before = { ...navState };
+  const oldView = still ? null : app.cloneNode(true), oldModal = !still && before.sheet ? modal.cloneNode(true) : null;
+  paint();
+  const now = { screen: ui.screen, tab: ui.tab, depth: depth(), sheet: !!ui.sheet, keys: !!document.querySelector('.keypad') };
+  Object.assign(navState, now);
+  if (still) return;
+
+  // 1. Screen change: push (deeper, or a new screen at the same level) or pop (back).
+  if (now.screen !== before.screen) {
+    const push = now.depth > before.depth || (now.depth === before.depth && now.screen);
+    document.querySelectorAll('.ghost').forEach(x => x.remove());
+    const g = ghost(oldView, -preScroll); g.className = oldView.className + ' ghost';
+    if (push) {
+      scrolls.push(preScroll);
+      g.animate([{ transform: 'translateX(0)', opacity: 1 }, { transform: 'translateX(-28%)', opacity: 0.55 }], { duration: PUSH_MS, easing: EASE, fill: 'forwards' });
+      app.classList.add('moving', 'top');
+      after(app.animate([{ left: '100%' }, { left: '0%' }], { duration: PUSH_MS, easing: EASE }), PUSH_MS, () => { app.classList.remove('moving', 'top'); g.remove(); });
+    } else {
+      const y = scrolls.pop() || 0; window.scrollTo(0, y);
+      g.style.zIndex = 8; g.classList.add('shadow');
+      after(g.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(100%)' }], { duration: PUSH_MS, easing: EASE, fill: 'forwards' }), PUSH_MS, () => g.remove());
+      app.classList.add('moving');
+      after(app.animate([{ left: '-28%', opacity: 0.55 }, { left: '0%', opacity: 1 }], { duration: PUSH_MS, easing: EASE }), PUSH_MS, () => app.classList.remove('moving'));
+    }
+  } else if (!now.screen && now.tab !== before.tab) {
+    app.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 160, easing: 'ease-out' });   // tabs: a quick fade, no slide
+  }
+
+  // 2. Sheet: rises when it opens, drops when it closes. No movement when only its content changes.
+  const sheet = modal.querySelector('.sheet');
+  if (now.sheet && !before.sheet && sheet) {
+    sheet.animate([{ transform: 'translateY(100%)' }, { transform: 'translateY(0)' }], { duration: SHEET_MS, easing: EASE });
+    modal.animate([{ backgroundColor: 'rgba(0,0,0,0)' }, { backgroundColor: 'rgba(0,0,0,.55)' }], { duration: SHEET_MS, easing: 'ease-out' });
+  } else if (!now.sheet && before.sheet && oldModal) {
+    oldModal.removeAttribute('id'); oldModal.hidden = false; oldModal.classList.add('modal-ghost'); document.body.appendChild(oldModal);
+    const os = oldModal.querySelector('.sheet');
+    if (os) os.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(100%)' }], { duration: SHEET_MS - 60, easing: EASE, fill: 'forwards' });
+    after(oldModal.animate([{ backgroundColor: 'rgba(0,0,0,.55)' }, { backgroundColor: 'rgba(0,0,0,0)' }], { duration: SHEET_MS - 60, easing: 'ease-in', fill: 'forwards' }), SHEET_MS - 60, () => oldModal.remove());
+  }
+
+  // 3. The number pad slides up the first time it shows.
+  const pad = document.querySelector('.keypad');
+  if (pad && !before.keys) pad.animate([{ transform: 'translateY(100%)' }, { transform: 'translateY(0)' }], { duration: 240, easing: EASE });
+}
+
+// What is under the current screen: the screen we came from, or the tab. Used while dragging back from the edge.
+function underHtml() {
+  const s0 = ui.screen, p0 = ui.prev, target = p0 && (p0 !== 'active' || S.active) ? p0 : null;
+  ui.screen = target; ui.prev = null;
+  const views = { active: viewActive, complete: viewComplete, preview: viewPreview, wsettings: viewWSettings, scsettings: viewScSettings, dashcfg: viewDashCfg, exlib: viewExLib, weight: viewWeight, program: viewProgram, analytics: viewAnalytics, history: viewHistory };
+  const tabs = { dash: viewDash, workout: viewWorkout, levels: viewLevels, more: viewMore };
+  let html = '', cls = '';
+  try { html = (target ? views[target] : tabs[ui.tab])(); cls = target ? 'screen-' + target : 'tab-' + ui.tab; } finally { ui.screen = s0; ui.prev = p0; }
+  return { html, cls };
+}
+
+// Drag from the left edge to go back. Drag a sheet down by its top to close it.
+let drag = null;
+document.addEventListener('pointerdown', e => {
+  if (drag || calm()) return;
+  const sheet = e.target.closest && e.target.closest('#modal .sheet');
+  if (sheet) {
+    const r = sheet.getBoundingClientRect();
+    if (e.clientY - r.top < 64 && !e.target.closest('button, input, textarea, select, a, label')) drag = { kind: 'sheet', el: sheet, y0: e.clientY, t0: e.timeStamp, dy: 0, h: r.height };
+    return;
+  }
+  if (!ui.sheet && SWIPE.includes(ui.screen) && e.clientX < 26) {
+    const app = document.getElementById('view'), u = underHtml(), under = document.createElement('main');
+    under.className = u.cls + ' ghost under'; under.innerHTML = u.html; under.style.top = -(scrolls[scrolls.length - 1] || 0) + 'px';
+    under.querySelectorAll('.keypad, .startbar').forEach(x => x.remove());
+    document.body.appendChild(under); app.classList.add('moving', 'top');
+    drag = { kind: 'back', el: app, under, x0: e.clientX, t0: e.timeStamp, dx: 0, w: window.innerWidth };
+  }
+}, { passive: true });
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (drag.kind === 'sheet') { drag.dy = Math.max(0, e.clientY - drag.y0); drag.el.style.transform = `translateY(${drag.dy}px)`; }
+  else { drag.dx = Math.max(0, e.clientX - drag.x0); const k = Math.min(1, drag.dx / drag.w); drag.el.style.left = drag.dx + 'px'; drag.under.style.transform = `translateX(${-28 * (1 - k)}%)`; drag.under.style.opacity = 0.55 + 0.45 * k; }
+}, { passive: true });
+function endDrag(e) {
+  if (!drag) return; const d = drag; drag = null;
+  const speed = (d.kind === 'sheet' ? d.dy : d.dx) / Math.max(1, e.timeStamp - d.t0);   // px per ms
+  if (d.kind === 'sheet') {
+    const go = d.dy > d.h * 0.3 || (d.dy > 40 && speed > 0.6);
+    const a = d.el.animate([{ transform: `translateY(${d.dy}px)` }, { transform: go ? 'translateY(100%)' : 'translateY(0)' }], { duration: go ? 220 : 260, easing: EASE, fill: 'forwards' });
+    after(a, go ? 220 : 260, () => { d.el.style.transform = ''; a.cancel(); if (go) { quiet = true; close(); save(); render(); quiet = false; navState.sheet = false; } });
+    return;
+  }
+  const go = d.dx > d.w * 0.35 || (d.dx > 30 && speed > 0.5);
+  const a = d.el.animate([{ left: d.dx + 'px' }, { left: go ? '100%' : '0px' }], { duration: go ? 240 : 280, easing: EASE, fill: 'forwards' });
+  d.under.animate([{ transform: d.under.style.transform || 'translateX(-28%)' }, { transform: go ? 'translateX(0)' : 'translateX(-28%)' }], { duration: go ? 240 : 280, easing: EASE, fill: 'forwards' });
+  after(a, go ? 240 : 280, () => {
+    a.cancel(); d.el.style.left = ''; d.el.classList.remove('moving', 'top');
+    if (go) { const y = scrolls.pop() || 0; quiet = true; actions.closeScreen(); save(); render(); quiet = false; window.scrollTo(0, y); }
+    d.under.remove();
+  });
+}
+document.addEventListener('pointerup', endDrag, { passive: true });
+document.addEventListener('pointercancel', endDrag, { passive: true });
 
 // Big wide title on the left, round buttons on the right. Same on every tab.
 const hero = (title, btns = '') => `<header class="hero"><h1 class="wide">${title}</h1><div class="hbtns">${btns}</div></header>`;
@@ -1277,8 +1398,9 @@ function choose(exId) {
 
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
-  if (!el) { if (e.target.id === 'modal') { close(); render(); } return; }
+  if (!el) { if (e.target.id === 'modal') { preScroll = window.scrollY; close(); render(); } return; }
   const fn = actions[el.dataset.act]; if (!fn) return;
+  preScroll = window.scrollY;
   fn(el.dataset, el); save(); render();
 });
 

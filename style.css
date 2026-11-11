@@ -566,3 +566,23 @@ main[class^="screen-"] { padding-bottom: calc(env(safe-area-inset-bottom) + 24px
 .scrolly { max-height: 30vh; overflow-y: auto; }
 .btn.video { display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; color: var(--ink); }
 .btn.video svg { width: 20px; height: 20px; }
+
+/* ---- Movimiento: pantallas que entran de lado, hojas que suben y gestos ---- */
+html { overflow-x: clip; }
+main { background: var(--bg); position: relative; left: 0; }
+main.screen-active, main.screen-complete { background: var(--top); }
+main.moving { will-change: left; }
+main.top { z-index: 7; box-shadow: -12px 0 28px rgba(0, 0, 0, .35); }
+.ghost { position: fixed !important; left: 0; right: 0; margin: 0 auto; z-index: 3; pointer-events: none; min-height: 100vh; will-change: transform; }
+.ghost.under { z-index: 2; transform: translateX(-28%); opacity: .55; }
+.ghost.shadow { box-shadow: -12px 0 28px rgba(0, 0, 0, .35); }
+.modal-ghost { position: fixed; inset: 0; z-index: 11; display: flex; align-items: flex-end; justify-content: center; pointer-events: none; }
+.sheet { will-change: transform; touch-action: pan-y; }
+.grab { cursor: grab; }
+/* una respuesta corta al tocar, como en una app */
+button:active, .btn:active, .mrow:active, .wrow:active, .pk:active { opacity: .72; }
+.btn:active, .hbtn:active, .fabplus:active, .num:active, .cell:active, .keys button:active { transform: scale(.96); }
+.btn, .hbtn, .fabplus, .num, .cell, .keys button { transition: transform .08s ease-out, opacity .08s ease-out; }
+.box.on svg { animation: pop .18s ease-out; }
+@keyframes pop { from { transform: scale(.4); } to { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .box.on svg { animation: none; } }
