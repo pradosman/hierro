@@ -27,7 +27,7 @@ const applyTheme = () => { const t = S.settings.theme; if (t === 'light' || t ==
 applyTheme();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Could not save. The phone is out of space.'); } };
 
-const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, cal: false, dashPage: 0, recMode: '1rm', infoTab: 'inst', warmMode: 'smart', noteTab: 'session', range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
+const ui = { tab: 'dash', screen: S.active ? 'active' : null, sheet: null, day: 0, cur: 0, focus: null, fresh: false, colMode: 'auto', pv: 0, plates: true, cal: false, dashPage: 0, recMode: '1rm', wRange: '1W', infoTab: 'inst', warmMode: 'smart', noteTab: 'session', range: '1W', metric: 'sets', dashMode: 'all', tmCycle: false, lib: null, progOpen: true, back: false, done: null, openHist: null };
 
 // ---------- Ayudas ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -177,7 +177,9 @@ const miniBody = m => body({ [m]: 1 }, FRONT.includes(m) ? 'front' : 'back', 'mi
 
 // ---------- Regla de progreso ----------
 function lastSets(exId) {
+  const same = S.settings.prevRef === 'same' && S.active ? S.active.dayName : null;
   for (let i = S.history.length - 1; i >= 0; i--) {
+    if (same && S.history[i].dayName !== same) continue;
     const item = S.history[i].items.find(x => x.ex === exId);
     if (item) { const sets = item.sets.filter(isWork); if (sets.length) return sets; }
   }
@@ -202,7 +204,10 @@ function retarget(item, fill) {
     if (!isWork(s)) return;
     const t = suggest(item, wi++);
     s.tw = t.tw; s.tr = t.tr; s.prev = t.prev ? { w: t.prev.w, r: t.prev.r, rir: t.prev.rir } : null;
-    if (fill && !s.done) { s.w = t.tw != null ? kg(t.tw) : ''; s.r = String(t.tr != null ? t.tr : Math.round((item.lo + item.hi) / 2)); s.rir = String(T(item, s, 'rir')); }
+    if (fill && !s.done) { const smart = S.settings.smart !== false, pw = t.prev ? t.prev.w : null, pr = t.prev ? t.prev.r : null;
+      s.w = smart ? (t.tw != null ? kg(t.tw) : '') : (pw != null ? kg(pw) : '');
+      s.r = String(smart ? (t.tr != null ? t.tr : Math.round((item.lo + item.hi) / 2)) : (pr != null ? pr : Math.round((item.lo + item.hi) / 2)));
+      s.rir = S.settings.rirTrack === false ? '' : String(T(item, s, 'rir')); }
   });
 }
 const T = (it, s, f) => (s && s['t' + f] != null ? s['t' + f] : it[f]);
@@ -237,8 +242,10 @@ function completeSet(i, s) {
     while (lo > 0 && items[lo - 1].ssNext) lo--;
     while (hi < items.length - 1 && items[hi].ssNext) hi++;
     const open = k => items[k].sets.some(q => !q.done);
-    if (hi > lo && i < hi) { ui.cur = i + 1; ui.focus = null; }                      // next exercise of the superset, no rest
-    else { if (item.restOn !== false) startRest(T(item, set, 'rest')); if (hi > lo) { const back = [...Array(hi - lo + 1).keys()].map(k => lo + k).find(open); if (back != null) { ui.cur = back; ui.focus = null; } } }
+    if (hi > lo && i < hi && S.settings.ssAuto !== false) { ui.cur = i + 1; ui.focus = null; }                      // next exercise of the superset, no rest
+    else { if (item.restOn !== false) startRest(T(item, set, 'rest')); if (hi > lo) { const back = [...Array(hi - lo + 1).keys()].map(k => lo + k).find(open); if (back != null && S.settings.ssAuto !== false) { ui.cur = back; ui.focus = null; } }
+      // Exercise Auto-Next: when this exercise is finished, move to the next one that still has sets left.
+      if (hi === lo && S.settings.autoNext !== false && !open(i)) { const nx = items.findIndex((x, k) => k > i && x.sets.some(q => !q.done)); if (nx >= 0) { ui.cur = nx; ui.focus = null; } } }
   }
   return true;
 }
@@ -260,7 +267,8 @@ function recordFor(exId) {
 }
 const sessionStats = h => {
   let sets = 0, vol = 0;
-  h.items.forEach(it => it.sets.filter(isWork).forEach(s => { sets++; vol += s.w * s.r; }));
+  const bw = S.settings.bwContrib !== false && (S.weights || []).length ? weightsSorted().slice(-1)[0].kg : 0;
+  h.items.forEach(it => { const add = bw && exById(it.ex).equip === 'Bodyweight' ? bw : 0; it.sets.filter(isWork).forEach(s => { sets++; vol += (s.w + add) * s.r; }); });
   return { sets, vol: Math.round(vol) };
 };
 function finishWorkout() {
@@ -320,7 +328,7 @@ function tick() {
 }
 setInterval(tick, 250);
 let lock;
-async function wake() { try { if (S.active && navigator.wakeLock) lock = await navigator.wakeLock.request('screen'); } catch (e) { /* no pasa nada */ } }
+async function wake() { try { if (S.active && S.settings.keepAwake !== false && navigator.wakeLock) lock = await navigator.wakeLock.request('screen'); } catch (e) { /* no pasa nada */ } }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { wake(); tick(); } });
 
 // ---------- Datos para gráficas ----------
@@ -374,12 +382,12 @@ function doneThisCycle(dayIdx) {
 function render() {
   const keep = [...document.querySelectorAll('[data-keep]')].map(el => [el.dataset.keep, el.scrollLeft]);
   const full = ui.screen;
-  const view = full ? { active: viewActive, complete: viewComplete, preview: viewPreview, program: viewProgram, analytics: viewAnalytics, history: viewHistory }[full]
+  const view = full ? { active: viewActive, complete: viewComplete, preview: viewPreview, wsettings: viewWSettings, weight: viewWeight, program: viewProgram, analytics: viewAnalytics, history: viewHistory }[full]
     : { dash: viewDash, workout: viewWorkout, levels: viewLevels, more: viewMore }[ui.tab];
   const app = document.getElementById('view');
   app.className = full ? 'screen-' + full : 'tab-' + ui.tab;
   app.innerHTML = view();
-  document.getElementById('tabs').hidden = !!full && full !== 'analytics';
+  document.getElementById('tabs').hidden = !!full && !['analytics', 'weight', 'wsettings'].includes(full);
   document.querySelectorAll('#tabs [data-tab]').forEach(b => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
   const m = document.getElementById('modal');
   m.innerHTML = ui.sheet ? `<div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${viewSheet()}</div>` : '';
@@ -436,7 +444,7 @@ ${ui.dashPage ? `<section class="top dashtop">
           <div class="bars">${setsArr.map(v => `<i style="height:${Math.max(8, (v / mx) * 100)}%"></i>`).join('')}</div>
           <p><b>${setsArr.length ? setsArr[setsArr.length - 1] : 0}</b> sets ${I.right}</p>
         </button>
-        <button class="card tile" data-act="sheet" data-type="weight">
+        <button class="card tile" data-act="open" data-screen="weight">
           <b>Weight Trend</b><span>Last 7 Days</span>
           ${lineSvg(trend.slice(-7).map(w => w.kg), '')}
           <p><b>${trend.length ? trend[trend.length - 1].kg.toFixed(1) : '--'}</b> kg ${I.right}</p>
@@ -455,7 +463,7 @@ ${ui.dashPage ? `<section class="top dashtop">
           <p><b>${thisWeek}</b> this week ${I.right}</p>
         </button>
       </div>
-      <div class="h2row"><h2>Body Metrics</h2><button class="link" data-act="sheet" data-type="weightList">See All</button></div>
+      <div class="h2row"><h2>Body Metrics</h2><button class="link" data-act="open" data-screen="weight">See All</button></div>
       <div class="two"><button class="card tile" data-act="sheet" data-type="weight"><b>Scale Weight</b><span>Last 7 Entries</span>${lineSvg(ws7.map(w => w.kg), 'green')}<p><b>${ws7.length ? ws7[ws7.length - 1].kg.toFixed(1) : '--'}</b> kg ${I.right}</p></button></div>
       <div class="h2row"><h2>Muscle Groups</h2><button class="link" data-act="tab" data-tab="levels">See All</button></div>
       <div class="two">${top2.map(([m, v]) => `<button class="card tile" data-act="tab" data-tab="levels"><b>${m}</b><span>Last 7 Days</span><div class="spark"></div><p><b>${v ? kg(v) : '--'}</b> sets ${I.right}</p></button>`).join('')}</div>
@@ -560,7 +568,7 @@ function viewActive() {
   const strip = a.items.map((x, i) => { const dn = x.sets.filter(s => s.done).length; return `<button class="tile ${i === ui.cur ? 'cur' : ''} ${x.ssNext ? 'ss' : ''}" data-act="cur" data-i="${i}" aria-label="${esc(exById(x.ex).name)}">${thumb(x.ex, 'lg')}<i><b style="width:${x.sets.length ? (dn / x.sets.length) * 100 : 0}%"></b></i></button>`; }).join('');
   let n = 0;
   const doneCount = it ? it.sets.filter(s => s.done).length : 0;
-  return `<header class="live"><button class="ic" data-act="wmenu" aria-label="Workout menu">${I.menu}</button><span id="elapsed" class="t">0:00:00</span>
+  return `<header class="live"><button class="ic" data-act="wmenu" aria-label="Workout menu">${I.menu}</button><span id="elapsed" class="t" ${S.settings.showTimer === false ? 'style="visibility:hidden"' : ''}>0:00:00</span>
       <span class="rest">${I.timer}<span id="restTime" class="t">0:00</span></span><button class="restbar" data-act="restSkip" aria-label="Skip rest"><b id="restBar"></b></button></header>
     <div class="strip" data-keep="strip">${strip}<button class="tile add" data-act="pick" data-for="session" aria-label="Add exercise">${I.plus}<i></i></button></div>
     ${it ? `<div class="exname"><h2>${esc(ex.name)}</h2><p>${it.ssNext || (ui.cur > 0 && a.items[ui.cur - 1].ssNext) ? 'Superset • ' : ''}Set ${Math.min(doneCount + 1, it.sets.length)} of ${it.sets.length}</p></div>
@@ -693,6 +701,73 @@ function viewHistory() {
 }
 
 const mrow = (act, icon, label, extra = '', right = I.right) => `<button class="mrow" data-act="${act}" ${extra}>${icon}<span>${label}</span>${right}</button>`;
+const sw = (f, icon, title, text, def = true) => `<label class="mrow srow">${icon}<span><b>${title}</b>${text}</span><input type="checkbox" data-bind="flag" data-f="${f}" ${(S.settings[f] === undefined ? def : S.settings[f]) ? 'checked' : ''}></label>`;
+const nav = (act, icon, title, text, extra = '') => `<button class="mrow srow" data-act="${act}" ${extra}>${icon}<span><b>${title}</b>${text}</span>${I.right}</button>`;
+function viewWSettings() {
+  return `<header class="bar"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>Workout</h1><span class="ic"></span></header>
+    <section class="pad">
+      <h2>General</h2>
+      <div class="card rows">
+        ${nav('sheet', I.timer, 'Rest Timer', 'Configure rest timer settings', 'data-type="rest"')}
+        ${nav('sheet', I.wand, 'Smart Progression', 'Configure smart progression settings', 'data-type="smart"')}
+        ${nav('sheet', I.warm, 'Warm-Up', 'Configure warm-up settings', 'data-type="warmcfg"')}
+        <div class="mrow srow">${I.hist}<span><b>Previous Reference</b>${S.settings.prevRef === 'same' ? 'Same workout' : 'Any workout'}</span><button class="editbtn" data-act="prevRef">Edit</button></div>
+        ${sw('propagate', I.next, 'Propagate Changes', 'Weight and rep edits also change the later sets that had the same weight and reps')}
+        ${sw('rirTrack', I.target, 'RIR Tracking', 'Fill in the RIR of each set from your program')}
+        ${sw('ssAuto', I.sort, 'Superset Auto-Scroll', 'Move between the exercises of a superset after each set')}
+        ${sw('autoNext', I.enter, 'Exercise Auto-Next', 'Move to the next exercise when one is completed')}
+      </div>
+      <h2>Display</h2>
+      <div class="card rows">
+        ${sw('keepAwake', I.info, 'Keep Alive', 'Keep the phone awake during a workout')}
+        ${sw('showTimer', I.timer, 'Workout Timer', 'Show the elapsed time during a workout')}
+        ${sw('bwContrib', I.scale, 'Bodyweight Contribution', 'Count your scale weight in the volume of bodyweight exercises')}
+      </div>
+    </section>`;
+}
+
+// ---------- Weight Trend screen
+function viewWeight() {
+  const R = { '1W': 7, '1M': 30, '3M': 91, '6M': 182, '1Y': 365, All: 0 }[ui.wRange];
+  const raw = weightsSorted(), trend = weightTrend(), end = new Date().setHours(0, 0, 0, 0) + DAY;
+  const from = R ? end - R * DAY : (raw.length ? new Date(raw[0].t).setHours(0, 0, 0, 0) : end - 7 * DAY);
+  const inR = a => a.filter(w => w.t >= from && w.t < end), tr = inR(trend), sc = inR(raw);
+  const fmt1 = v => (v == null ? '--' : v.toFixed(1));
+  const avg = tr.length ? tr.reduce((n, w) => n + w.kg, 0) / tr.length : null;
+  const diff = tr.length > 1 ? tr[tr.length - 1].kg - tr[0].kg : (tr.length ? 0 : null);
+  const top = Math.max(50, Math.ceil(Math.max(0, ...sc.map(w => w.kg), ...tr.map(w => w.kg)) / 50) * 50);
+  const X = t => ((t - from) / (end - from)) * 100, Y = v => 100 - (v / top) * 100;
+  const path = a => a.map(w => `${X(w.t).toFixed(2)},${Y(w.kg).toFixed(2)}`).join(' ');
+  const dfmt = t => new Date(t).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+  const days = Math.round((end - from) / DAY), ticks = Math.min(7, days);
+  const labels = Array.from({ length: ticks }, (_, i) => { const t = from + Math.round((i * days) / ticks) * DAY; return days <= 7 ? new Date(t).toLocaleDateString('en-US', { weekday: 'short' }) : dfmt(t); });
+  const at = t => { const b = trend.filter(w => w.t <= t); return b.length ? b[b.length - 1].kg : null; };
+  const now = trend.length ? trend[trend.length - 1] : null;
+  const change = n => { const a = now ? at(now.t - n * DAY) : null; return now && a != null ? now.kg - a : null; };
+  const word = v => (v == null ? 'No data' : Math.abs(v) < 0.05 ? 'No change' : v > 0 ? 'Increase' : 'Decrease');
+  const wk = change(21) != null ? change(21) / 3 : change(7);
+  return `<header class="bar"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>Weight Trend</h1><button class="ic" data-act="sheet" data-type="weight" aria-label="Add weigh-in">${I.plus}</button></header>
+    <section class="top chartbox">
+      <div class="stats"><div><span>Average</span><b>${fmt1(avg)} <small>kg</small></b></div><div><span>Difference</span><b>${diff == null ? '--' : (diff > 0 ? '+' : '') + diff.toFixed(1)} <small>kg</small></b></div></div>
+      <p class="range">${dfmt(from)} - ${dfmt(end - DAY)}, ${new Date(end - DAY).getFullYear()}</p>
+      <div class="chart2"><div class="grid2"><i></i><i></i><i></i></div>
+        <div class="linebox"><svg viewBox="0 0 100 100" preserveAspectRatio="none">${sc.length > 1 ? `<polyline class="l-scale" points="${path(sc)}"/>` : ''}${tr.length > 1 ? `<polyline class="l-trend" points="${path(tr)}"/>` : ''}</svg>
+          ${tr.map(w => `<i class="dot" style="left:${X(w.t).toFixed(2)}%;top:${Y(w.kg).toFixed(2)}%"></i>`).join('')}
+          <div class="xax">${labels.map(l => `<span>${l}</span>`).join('')}</div></div>
+        <div class="yax"><span>${top}</span><span>${top / 2}</span><span>0</span></div></div>
+      <div class="seg wide3">${['1W', '1M', '3M', '6M', '1Y', 'All'].map(r => `<button data-act="wRange" data-r="${r}" aria-pressed="${ui.wRange === r}">${r}</button>`).join('')}</div>
+    </section>
+    <section class="pad">
+      <div class="card legendcard two-l"><span><i class="k-scale"></i>Scale Weight</span><span><i class="k-trend"></i>Trend Weight</span></div>
+      <h2>Insights &amp; Data</h2>
+      <div class="card wchanges"><b>Weight Changes</b>${[3, 7, 14, 30, 90].map(n => { const v = change(n); return `<div><span>${n}-day</span>${lineSvg(trend.filter(w => now && w.t >= now.t - n * DAY).map(w => w.kg), 'mini')}<em>${v == null ? '--' : Math.abs(v).toFixed(1)} kg</em><small>${word(v)}</small></div>`; }).join('')}</div>
+      <div class="card kpi"><div class="kbox"><b>${fmt1(now ? now.kg : null)}</b><span>kg</span></div><div><b>Current Weight</b><p>Your trend weight. It smooths the day-to-day jumps of the scale.</p></div></div>
+      <div class="card kpi"><div class="kbox"><b>${wk == null ? '--' : (wk > 0 ? '+' : '') + wk.toFixed(2)}</b><span>kg per week</span></div><div><b>Weekly Weight Change</b><p>How fast your trend weight has moved over the last three weeks.</p></div></div>
+      <div class="h2row"><h2>Weigh-Ins</h2><button class="link" data-act="sheet" data-type="weight">Add</button></div>
+      <div class="card list">${raw.slice().reverse().slice(0, 30).map(w => `<div><span>${new Date(w.t).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span><b>${w.kg.toFixed(1)} kg</b></div>`).join('') || '<div><span>No weigh-ins yet.</span></div>'}</div>
+    </section>`;
+}
+
 function viewMore() {
   const n = S.history.length, th = S.settings.theme || 'system';
   const tile = (t, label) => `<button class="ttile t-${t}" data-act="theme" data-t="${t}" aria-pressed="${th === t}" aria-label="${label} theme"><b>Aa</b><span><i></i><i></i><i></i><i></i></span></button>`;
@@ -702,7 +777,7 @@ function viewMore() {
       <h2>General</h2>
       <div class="card rows">${mrow('sheet', I.scale, 'Units', 'data-type="units"')}${mrow('sheet', I.timer, 'Rest Timer', 'data-type="rest"')}${mrow('sheet', I.globe, 'Language', 'data-type="about"', '<b class="val">English</b>')}</div>
       <h2>Feature Settings</h2>
-      <div class="card rows">${mrow('tab', I.dash, 'Dashboard', 'data-tab="dash"')}${mrow('tab', I.workout, 'Workout', 'data-tab="workout"')}${mrow('plusSheet', I.plus, 'Shortcuts')}${mrow('sheet', I.scale, 'Weight Trend', 'data-type="weightList"')}${mrow('sheet', I.info, 'Exercises', 'data-type="exlib"')}${mrow('sheet', I.gym, 'Gym Profiles', 'data-type="gyms"')}</div>
+      <div class="card rows">${mrow('tab', I.dash, 'Dashboard', 'data-tab="dash"')}${mrow('open', I.workout, 'Workout', 'data-screen="wsettings"')}${mrow('plusSheet', I.plus, 'Shortcuts')}${mrow('open', I.scale, 'Weight Trend', 'data-screen="weight"')}${mrow('sheet', I.info, 'Exercises', 'data-type="exlib"')}${mrow('sheet', I.gym, 'Gym Profiles', 'data-type="gyms"')}</div>
       <h2>Theme</h2>
       <div class="themes">${tile('light', 'Light')}${tile('dark', 'Dark')}${tile('system', 'System')}</div>
       <h2>Data Management</h2>
@@ -729,7 +804,7 @@ function viewSheet() {
   }
   if (m.type === 'day') { const d = S.program.days[m.i]; return `<h2>${esc(d.name)}</h2><p class="muted">${d.items.length} exercises</p>
     <button class="btn primary" data-act="start" data-i="${m.i}">Start Workout</button><button class="btn" data-act="editProgram" data-i="${m.i}">Edit</button>`; }
-  if (m.type === 'wmenu') return `<h2 class="center">Workout Options</h2>${opt('minimize', I.down, 'Minimize workout')}${opt('finish', I.check, 'Finish workout')}${opt('sheet', I.timer, 'Workout settings', 'data-type="rest"')}${opt('sheet', I.gym, 'Gym settings', 'data-type="equip"')}${opt('discard', I.trash, 'Discard workout', 'style="color:var(--red)"')}`;
+  if (m.type === 'wmenu') return `<h2 class="center">Workout Options</h2>${opt('minimize', I.down, 'Minimize workout')}${opt('finish', I.check, 'Finish workout')}${opt('open', I.timer, 'Workout settings', 'data-screen="wsettings"')}${opt('sheet', I.gym, 'Gym settings', 'data-type="equip"')}${opt('discard', I.trash, 'Discard workout', 'style="color:var(--red)"')}`;
   if (m.type === 'discard') return `<h2>Discard this workout?</h2><p class="muted">Your progress will be lost and this workout will not be saved.</p><button class="btn red" data-act="discardYes">Discard</button><button class="btn danger plain" data-act="close">Go Back</button>`;
   if (m.type === 'targets') { const it = S.active.items[ui.cur]; let n = 0;
     const cell = (j, f, v, off) => `<input inputmode="numeric" data-bind="tset" data-s="${j}" data-f="${f}" value="${v}" ${off ? 'disabled' : ''} aria-label="${f}">`;
@@ -840,6 +915,12 @@ function viewSheet() {
           ${edit === 'bar' ? `<label class="inl">Bar weight (kg)<input inputmode="decimal" data-bind="gymF" data-id="${g.id}" data-f="bar" value="${kg(g.bar)}"></label>` : edit === 'plates' ? `<label class="inl">Edit Weights (kg)<input data-bind="gymF" data-id="${g.id}" data-f="plates" value="${g.plates.map(kg).join(' ')}"></label>` : ''}</div>
           ${k === 'plates' ? '' : `<button class="box ${on(k) ? 'on' : ''}" data-act="eqToggle" data-id="${g.id}" data-k="${k}" aria-pressed="${on(k)}" aria-label="${label}">${on(k) ? I.check : ''}</button>`}</div>`).join('')}`; }).join('')}
       <div class="pbottom"><label class="search">${I.search}<input type="search" placeholder="Filter equipment by name" aria-label="Filter equipment by name" data-bind="eqQ" value="${esc(m.q || '')}"></label></div>`; }
+  if (m.type === 'smart') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Smart Progression</h2><span></span></div>
+    ${sw('smart', I.wand, 'Smart Progression', 'Fill each set with the weight and reps to beat. When it is off, sets are filled with what you did last time.')}
+    <p class="muted">The rule: reach the top of the rep range with your target RIR, then the weight goes up one step and the reps go back to the bottom.</p><button class="btn primary" data-act="close">Done</button>`;
+  if (m.type === 'warmcfg') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Warm-Up</h2><span></span></div>
+    <div class="card list"><div><span>Warm-up 1</span><b>50 % x 8</b></div><div><span>Warm-up 2</span><b>70 % x 5</b></div><div><span>Warm-up 3</span><b>85 % x 2</b></div></div>
+    <p class="muted">Percentages of the weight of your first working set, rounded to the step of the exercise.</p><button class="btn primary" data-act="close">Done</button>`;
   if (m.type === 'rest') return `<h2>Rest Timer</h2>
     <label class="field">Default for new exercises (sec)<input inputmode="numeric" data-bind="setting" data-f="rest" value="${S.settings.rest}"></label>
     <label class="field switch">Alert sound<input type="checkbox" data-bind="setting" data-f="sound" ${S.settings.sound ? 'checked' : ''}></label>
@@ -865,9 +946,9 @@ const actions = {
   tab(d) { ui.tab = d.tab; ui.screen = null; close(); window.scrollTo(0, 0); },
   close,
   sheet(d) { ui.sheet = { type: d.type }; },
-  open(d) { ui.screen = d.screen; if (d.metric) ui.metric = d.metric; close(); window.scrollTo(0, 0); },
+  open(d) { if (ui.screen && ui.screen !== d.screen) ui.prev = ui.screen; ui.screen = d.screen; if (d.metric) ui.metric = d.metric; close(); window.scrollTo(0, 0); },
   doneComplete() { const d = ui.done; if (d && d.planUp && d.changed && S.program && S.program.days[d.dayIdx]) { const old = S.program.days[d.dayIdx].items; S.program.days[d.dayIdx].items = d.sess.filter(x => x.sets > 0).map(x => ({ ...x, note: (old.find(o => o.ex === x.ex) || {}).note })); toast('Workout plan updated.'); } actions.closeScreen(); },
-  closeScreen() { ui.screen = null; ui.done = null; close(); window.scrollTo(0, 0); },
+  closeScreen() { ui.screen = ui.prev && (ui.prev !== 'active' || S.active) ? ui.prev : null; ui.prev = null; ui.done = null; close(); window.scrollTo(0, 0); },
   dashMode(d) { ui.dashMode = d.m; },
   dashPage(d) { ui.dashPage = +d.p; },
   recMode(d) { ui.recMode = d.m; },
@@ -875,6 +956,8 @@ const actions = {
   range(d) { ui.range = d.r; },
   tmMode(d) { ui.tmCycle = !!d.v; },
   flip() { ui.back = !ui.back; },
+  wRange(d) { ui.wRange = d.r; },
+  prevRef() { S.settings.prevRef = S.settings.prevRef === 'same' ? 'any' : 'same'; },
   weightSave() { const v = num(document.getElementById('wIn').value); if (!v || v <= 0) return toast('Enter your weight.'); const t0 = new Date().setHours(0, 0, 0, 0); S.weights = (S.weights || []).filter(w => !(w.t >= t0 && w.t < t0 + DAY)); S.weights.push({ t: Date.now(), kg: Math.round(v * 10) / 10 }); close(); toast('Weight saved.'); },
   weightDel() { const t0 = new Date().setHours(0, 0, 0, 0); S.weights = (S.weights || []).filter(w => !(w.t >= t0 && w.t < t0 + DAY)); close(); },
   theme(d) { S.settings.theme = d.t; applyTheme(); },
@@ -918,14 +1001,15 @@ const actions = {
   step(d) { const set = curItem().sets[ui.focus.s], inc = exById(curItem().ex).inc || 2.5; set.w = kg(Math.max(0, (num(set.w) || 0) + +d.dir * inc)); ui.fresh = false; },
   cur(d) { ui.cur = +d.i; ui.focus = null; },
   colMode() { ui.colMode = ui.colMode === 'prev' ? 'auto' : 'prev'; },
-  focus(d) { unlockAudio(); ui.focus = { s: +d.s, f: d.f }; ui.fresh = true; },
+  focus(d) { unlockAudio(); ui.focus = { s: +d.s, f: d.f }; ui.fresh = true; ui.prop = null; curItem().sets.forEach(q => { delete q._p; }); },
   hideKeys() { ui.focus = null; },
   key(d) {
     const set = curItem().sets[ui.focus.s], f = ui.focus.f; let v = ui.fresh ? '' : String(set[f] || '');
     if (d.k === 'back') v = ui.fresh ? '' : v.slice(0, -1);
     else if (d.k === '.') { if (f !== 'w' || v.includes('.')) return; v = (v || '0') + '.'; }
     else if (v.replace('.', '').length < 5) v += d.k;
-    set[f] = v; ui.fresh = false;
+    const old = String(set[f] || ''); set[f] = v; ui.fresh = false;
+    if (S.settings.propagate !== false) { const sets = curItem().sets; if (ui.prop == null || ui.prop.s !== ui.focus.s || ui.prop.f !== f) ui.prop = { s: ui.focus.s, f, old }; sets.forEach((q, k) => { if (k > ui.focus.s && !q.done && isWork(q) && (String(q[f] || '') === ui.prop.old || q._p === ui.prop.s + f)) { q[f] = v; q._p = ui.prop.s + f; } }); }
   },
   rir(d) { const set = curItem().sets[ui.focus.s]; set.rir = String(set.rir) === d.v ? '' : d.v; },
   clearRir() { curItem().sets[ui.focus.s].rir = ''; toast('RIR = reps in reserve. Pick a number above.'); },
@@ -1023,6 +1107,7 @@ const binds = {
   gymF(el, d) { const g = gym(d.id); if (d.f === 'bar') { const n = num(el.value); if (n != null && n >= 0) g.bar = n; } else { const p = el.value.split(/[\s;,]+/).map(num).filter(n => n > 0); if (p.length) g.plates = p; } },
   eqQ(el) { ui.sheet.q = el.value; },
   ssNext(el) { curItem().ssNext = el.checked; render(); },
+  flag(el, d) { S.settings[d.f] = el.checked; if (d.f === 'keepAwake') { if (el.checked) wake(); else if (lock) { try { lock.release(); } catch (e) { /* ya estaba suelto */ } lock = null; } } },
   planUp(el) { if (ui.done) ui.done.planUp = el.checked; },
   aitem(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(); it[d.f] = Math.round(n); if (it.hi < it.lo) it.hi = it.lo; },
   itemRest(el) { const n = num(el.value); if (n != null) curItem().rest = Math.max(0, Math.round(n)); },
