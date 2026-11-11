@@ -243,9 +243,15 @@ function completeSet(i, s) {
     while (hi < items.length - 1 && items[hi].ssNext) hi++;
     const open = k => items[k].sets.some(q => !q.done);
     if (hi > lo && i < hi && S.settings.ssAuto !== false) { ui.cur = i + 1; ui.focus = null; }                      // next exercise of the superset, no rest
-    else { if (item.restOn !== false) startRest(T(item, set, 'rest')); if (hi > lo) { const back = [...Array(hi - lo + 1).keys()].map(k => lo + k).find(open); if (back != null && S.settings.ssAuto !== false) { ui.cur = back; ui.focus = null; } }
+    else { const lastOfEx = !open(i) && hi === lo;
+      if (S.settings.useRest !== false && item.restOn !== false && (!lastOfEx || S.settings.restBetweenEx === true)) startRest(T(item, set, 'rest'));
+      if (hi > lo) { const back = [...Array(hi - lo + 1).keys()].map(k => lo + k).find(open); if (back != null && S.settings.ssAuto !== false) { ui.cur = back; ui.focus = null; } }
       // Exercise Auto-Next: when this exercise is finished, move to the next one that still has sets left.
       if (hi === lo && S.settings.autoNext !== false && !open(i)) { const nx = items.findIndex((x, k) => k > i && x.sets.some(q => !q.done)); if (nx >= 0) { ui.cur = nx; ui.focus = null; } } }
+  } else {
+    // Warm-up sets only start a rest after the last one, and only when that setting is on.
+    const next = item.sets[s + 1];
+    if ((!next || isWork(next)) && S.settings.useRest !== false && S.settings.restAfterWarm !== false && item.restOn !== false) startRest(T(item, set, 'rest'));
   }
   return true;
 }
@@ -941,9 +947,15 @@ function viewSheet() {
   if (m.type === 'warmcfg') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Warm-Up</h2><span></span></div>
     <div class="card list"><div><span>Warm-up 1</span><b>50 % x 8</b></div><div><span>Warm-up 2</span><b>70 % x 5</b></div><div><span>Warm-up 3</span><b>85 % x 2</b></div></div>
     <p class="muted">Percentages of the weight of your first working set, rounded to the step of the exercise.</p><button class="btn primary" data-act="close">Done</button>`;
-  if (m.type === 'rest') return `<h2>Rest Timer</h2>
-    <label class="field">Default for new exercises (sec)<input inputmode="numeric" data-bind="setting" data-f="rest" value="${S.settings.rest}"></label>
-    <label class="field switch">Alert sound<input type="checkbox" data-bind="setting" data-f="sound" ${S.settings.sound ? 'checked' : ''}></label>
+  if (m.type === 'rest') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Rest Timer</h2><span></span></div>
+    <h3 class="subh">Behavior</h3>
+    <div class="card rows">
+      ${sw('useRest', I.timer, 'Use Rest Timers', 'Start a countdown after each set')}
+      ${sw('sound', I.info, 'Notifications', 'Play a sound when the rest is over')}
+      <label class="mrow srow">${I.hist}<span><b>Timer Duration</b>Seconds of rest for exercises you add</span><input class="numin" inputmode="numeric" data-bind="setting" data-f="rest" value="${S.settings.rest}" aria-label="Rest in seconds"></label>
+      ${sw('restAfterWarm', I.warm, 'Rest After Last Warm-up Set', 'Start a rest after the last warm-up set')}
+      ${sw('restBetweenEx', I.enter, 'Rest Between Exercises', 'Start a rest when you finish an exercise and move to the next', false)}
+    </div>
     <button class="btn primary" data-act="close">Done</button>`;
   return '';
 }

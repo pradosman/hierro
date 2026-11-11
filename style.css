@@ -535,3 +535,6 @@ main[class^="screen-"] { padding-bottom: calc(env(safe-area-inset-bottom) + 24px
 .scico svg { width: 20px; height: 20px; }
 .srow .ic { width: 38px; height: 38px; color: var(--mut); }
 .screen-scsettings { padding-bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom) + 24px) !important; }
+.numin { width: 78px; height: 40px; border-radius: 8px; border: 2px solid transparent; background: var(--fill); text-align: center; font-size: 16px; flex: none; }
+.numin:focus { outline: 0; border-color: var(--ink); background: var(--top); }
+.sheet .card.rows .srow { padding-left: 14px; padding-right: 14px; }
