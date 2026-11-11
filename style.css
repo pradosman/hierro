@@ -586,3 +586,16 @@ button:active, .btn:active, .mrow:active, .wrow:active, .pk:active { opacity: .7
 .box.on svg { animation: pop .18s ease-out; }
 @keyframes pop { from { transform: scale(.4); } to { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .box.on svg { animation: none; } }
+
+/* Los toques responden al instante en todo, también sobre el texto de dentro de un botón (sin espera de doble toque). */
+/* The page itself only scrolls up and down. So a sideways drag belongs to the app, not to the browser. */
+html, body { touch-action: pan-y; overscroll-behavior-x: none; }
+.sheet { touch-action: pan-y; }
+.pills, .hscroll, .strip, .tabsrow, .mtiles, .chips { touch-action: pan-x pan-y; }
+/* A thin strip on the left edge: a drag that starts here goes back one screen. */
+#edge { position: fixed; left: 0; top: 0; bottom: 0; width: 14px; z-index: 9; touch-action: none; }
+#edge[hidden] { display: none; }
+/* The top of a sheet is its handle: drag it down to close. */
+.sheet > .grab, .sheet > .shead, .sheet > h2 { touch-action: none; }
+.grab { position: relative; }
+.grab::before { content: ""; position: absolute; left: -120px; right: -120px; top: -10px; bottom: -14px; }

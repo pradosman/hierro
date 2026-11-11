@@ -424,6 +424,8 @@ const cycleNo = () => cyc().n;
 const doneThisCycle = dayIdx => !!(S.program && S.program.days[dayIdx] && cyc().done[S.program.days[dayIdx].id]);
 
 // ---------- Screens ----------
+// The tab bar stays on some inner screens and hides on the others.
+const noTabs = scr => !!scr && !['analytics', 'weight', 'wsettings', 'scsettings', 'dashcfg', 'exlib'].includes(scr);
 function paint() {
   const keep = [...document.querySelectorAll('[data-keep]')].map(el => [el.dataset.keep, el.scrollLeft]);
   const full = ui.screen;
@@ -432,7 +434,7 @@ function paint() {
   const app = document.getElementById('view');
   app.className = full ? 'screen-' + full : 'tab-' + ui.tab;
   app.innerHTML = view();
-  document.getElementById('tabs').hidden = !!full && !['analytics', 'weight', 'wsettings', 'scsettings', 'dashcfg', 'exlib'].includes(full);
+  document.getElementById('tabs').hidden = noTabs(full);
   document.querySelectorAll('#tabs [data-tab]').forEach(b => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
   const m = document.getElementById('modal');
   m.innerHTML = ui.sheet ? `<div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${viewSheet()}</div>` : '';
@@ -444,7 +446,9 @@ function paint() {
 // ---------- Motion ----------
 // Screens slide in from the right and slide back out. Sheets rise from the bottom and can be dragged down.
 // A screen can also be closed by dragging from the left edge.
-const EASE = 'cubic-bezier(.32,.72,0,1)', PUSH_MS = 380, SHEET_MS = 320;
+// ?slow=8 in the address makes every movement 8 times longer, to look at it frame by frame.
+const SLOW = Math.max(1, +new URLSearchParams(location.search).get('slow') || 1);
+const EASE = 'cubic-bezier(.32,.72,0,1)', PUSH_MS = 380 * SLOW, SHEET_MS = 320 * SLOW;
 const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 // Runs fn once when the animation ends. A timer backs it up, because a page in the background never finishes its animations.
 function after(anim, ms, fn) { let done = false; const run = () => { if (done) return; done = true; fn(); }; anim.onfinish = run; setTimeout(run, ms + 90); return anim; }
@@ -460,11 +464,17 @@ function ghost(el, top) {
   g.querySelectorAll('.keypad, .startbar').forEach(x => x.remove());
   document.body.appendChild(g); return g;
 }
+// Bars glued to the bottom of the screen do not move with the page, so they get the same movement by hand.
+const edge = document.body.appendChild(Object.assign(document.createElement('div'), { id: 'edge', hidden: true }));
+function resetTabs() { const t = document.getElementById('tabs'); t.getAnimations().forEach(x => x.cancel()); t.style.zIndex = ''; t.style.transform = ''; t.style.opacity = ''; t.hidden = noTabs(ui.screen); }
+const bars = el => [...el.querySelectorAll('.startbar')];
 function render() {
   const app = document.getElementById('view'), modal = document.getElementById('modal');
   const still = quiet || calm(), before = { ...navState };
+  const tabsEl = document.getElementById('tabs'), tabsWas = !tabsEl.hidden;
   const oldView = still ? null : app.cloneNode(true), oldModal = !still && before.sheet ? modal.cloneNode(true) : null;
   paint();
+  edge.hidden = !!ui.sheet || !SWIPE.includes(ui.screen);
   const now = { screen: ui.screen, tab: ui.tab, depth: depth(), sheet: !!ui.sheet, keys: !!document.querySelector('.keypad') };
   Object.assign(navState, now);
   if (still) return;
@@ -473,17 +483,24 @@ function render() {
   if (now.screen !== before.screen) {
     const push = now.depth > before.depth || (now.depth === before.depth && now.screen);
     document.querySelectorAll('.ghost').forEach(x => x.remove());
+    app.getAnimations().forEach(x => x.cancel()); app.classList.remove('moving', 'top');   // a second tap while the first move is still running
+    oldView.classList.remove('moving', 'top');
     const g = ghost(oldView, -preScroll); g.className = oldView.className + ' ghost';
     if (push) {
       scrolls.push(preScroll);
       g.animate([{ transform: 'translateX(0)', opacity: 1 }, { transform: 'translateX(-28%)', opacity: 0.55 }], { duration: PUSH_MS, easing: EASE, fill: 'forwards' });
       app.classList.add('moving', 'top');
       after(app.animate([{ left: '100%' }, { left: '0%' }], { duration: PUSH_MS, easing: EASE }), PUSH_MS, () => { app.classList.remove('moving', 'top'); g.remove(); });
+      bars(app).forEach(b => b.animate([{ transform: 'translateX(100%)' }, { transform: 'translateX(0)' }], { duration: PUSH_MS, easing: EASE }));
+      if (tabsWas && tabsEl.hidden) { tabsEl.hidden = false; tabsEl.style.zIndex = 4; after(tabsEl.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-28%)' }], { duration: PUSH_MS, easing: EASE, fill: 'forwards' }), PUSH_MS, () => resetTabs()); }
+      else if (tabsWas) { tabsEl.style.zIndex = 9; setTimeout(resetTabs, PUSH_MS + 90); }
     } else {
       const y = scrolls.pop() || 0; window.scrollTo(0, y);
       g.style.zIndex = 8; g.classList.add('shadow');
       after(g.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(100%)' }], { duration: PUSH_MS, easing: EASE, fill: 'forwards' }), PUSH_MS, () => g.remove());
       app.classList.add('moving');
+      if (!tabsWas && !tabsEl.hidden) after(tabsEl.animate([{ transform: 'translateX(-28%)' }, { transform: 'translateX(0)' }], { duration: PUSH_MS, easing: EASE }), PUSH_MS, () => resetTabs());
+      else if (tabsWas) { tabsEl.style.zIndex = 9; setTimeout(resetTabs, PUSH_MS + 90); }
       after(app.animate([{ left: '-28%', opacity: 0.55 }, { left: '0%', opacity: 1 }], { duration: PUSH_MS, easing: EASE }), PUSH_MS, () => app.classList.remove('moving'));
     }
   } else if (!now.screen && now.tab !== before.tab) {
@@ -515,17 +532,18 @@ function underHtml() {
   const tabs = { dash: viewDash, workout: viewWorkout, levels: viewLevels, more: viewMore };
   let html = '', cls = '';
   try { html = (target ? views[target] : tabs[ui.tab])(); cls = target ? 'screen-' + target : 'tab-' + ui.tab; } finally { ui.screen = s0; ui.prev = p0; }
-  return { html, cls };
+  return { html, cls, tabs: !noTabs(target) };
 }
 
+const dim = k => { document.getElementById('modal').style.backgroundColor = k == null ? '' : `rgba(0,0,0,${k})`; };
 // Drag from the left edge to go back. Drag a sheet down by its top to close it.
 let drag = null;
 document.addEventListener('pointerdown', e => {
-  if (drag || calm()) return;
+  if (drag || calm() || document.getElementById('view').classList.contains('moving')) return;
   const sheet = e.target.closest && e.target.closest('#modal .sheet');
   if (sheet) {
     const r = sheet.getBoundingClientRect();
-    if (e.clientY - r.top < 64 && !e.target.closest('button, input, textarea, select, a, label')) drag = { kind: 'sheet', el: sheet, y0: e.clientY, t0: e.timeStamp, dy: 0, h: r.height };
+    if ((e.clientY - r.top < 64 || e.target.closest('.grab, .shead')) && !e.target.closest('button, input, textarea, select, a, label')) drag = { kind: 'sheet', el: sheet, y0: e.clientY, t0: e.timeStamp, dy: 0, h: r.height };
     return;
   }
   if (!ui.sheet && SWIPE.includes(ui.screen) && e.clientX < 26) {
@@ -533,13 +551,15 @@ document.addEventListener('pointerdown', e => {
     under.className = u.cls + ' ghost under'; under.innerHTML = u.html; under.style.top = -(scrolls[scrolls.length - 1] || 0) + 'px';
     under.querySelectorAll('.keypad, .startbar').forEach(x => x.remove());
     document.body.appendChild(under); app.classList.add('moving', 'top');
-    drag = { kind: 'back', el: app, under, x0: e.clientX, t0: e.timeStamp, dx: 0, w: window.innerWidth };
+    const tb = document.getElementById('tabs'), tabsIn = u.tabs && tb.hidden;
+    if (tabsIn) { tb.hidden = false; tb.style.zIndex = 4; tb.style.transform = 'translateX(-28%)'; } else if (!tb.hidden) tb.style.zIndex = 9;
+    drag = { kind: 'back', el: app, under, tb: tabsIn ? tb : null, x0: e.clientX, t0: e.timeStamp, dx: 0, w: window.innerWidth };
   }
 }, { passive: true });
 document.addEventListener('pointermove', e => {
   if (!drag) return;
-  if (drag.kind === 'sheet') { drag.dy = Math.max(0, e.clientY - drag.y0); drag.el.style.transform = `translateY(${drag.dy}px)`; }
-  else { drag.dx = Math.max(0, e.clientX - drag.x0); const k = Math.min(1, drag.dx / drag.w); drag.el.style.left = drag.dx + 'px'; drag.under.style.transform = `translateX(${-28 * (1 - k)}%)`; drag.under.style.opacity = 0.55 + 0.45 * k; }
+  if (drag.kind === 'sheet') { drag.dy = Math.max(0, e.clientY - drag.y0); drag.el.style.transform = `translateY(${drag.dy}px)`; dim(0.55 * (1 - Math.min(1, drag.dy / drag.h))); }
+  else { drag.dx = Math.max(0, e.clientX - drag.x0); const k = Math.min(1, drag.dx / drag.w); drag.el.style.left = drag.dx + 'px'; bars(drag.el).forEach(b => { b.style.transform = `translateX(${drag.dx}px)`; }); drag.under.style.transform = `translateX(${-28 * (1 - k)}%)`; drag.under.style.opacity = 0.55 + 0.45 * k; if (drag.tb) { drag.tb.style.transform = drag.under.style.transform; } }
 }, { passive: true });
 function endDrag(e) {
   if (!drag) return; const d = drag; drag = null;
@@ -547,16 +567,20 @@ function endDrag(e) {
   if (d.kind === 'sheet') {
     const go = d.dy > d.h * 0.3 || (d.dy > 40 && speed > 0.6);
     const a = d.el.animate([{ transform: `translateY(${d.dy}px)` }, { transform: go ? 'translateY(100%)' : 'translateY(0)' }], { duration: go ? 220 : 260, easing: EASE, fill: 'forwards' });
-    after(a, go ? 220 : 260, () => { d.el.style.transform = ''; a.cancel(); if (go) { quiet = true; close(); save(); render(); quiet = false; navState.sheet = false; } });
+    const m = document.getElementById('modal'), k = 0.55 * (1 - Math.min(1, d.dy / d.h));
+    const b = m.animate([{ backgroundColor: `rgba(0,0,0,${k})` }, { backgroundColor: `rgba(0,0,0,${go ? 0 : 0.55})` }], { duration: go ? 220 : 260, easing: 'ease-out', fill: 'forwards' });
+    after(a, go ? 220 : 260, () => { d.el.style.transform = ''; a.cancel(); b.cancel(); dim(null); if (go) { quiet = true; close(); save(); render(); quiet = false; navState.sheet = false; } });
     return;
   }
   const go = d.dx > d.w * 0.35 || (d.dx > 30 && speed > 0.5);
   const a = d.el.animate([{ left: d.dx + 'px' }, { left: go ? '100%' : '0px' }], { duration: go ? 240 : 280, easing: EASE, fill: 'forwards' });
+  bars(d.el).forEach(b => { b.animate([{ transform: `translateX(${d.dx}px)` }, { transform: go ? 'translateX(100%)' : 'translateX(0)' }], { duration: go ? 240 : 280, easing: EASE, fill: 'forwards' }); });
   d.under.animate([{ transform: d.under.style.transform || 'translateX(-28%)' }, { transform: go ? 'translateX(0)' : 'translateX(-28%)' }], { duration: go ? 240 : 280, easing: EASE, fill: 'forwards' });
+  if (d.tb) d.tb.animate([{ transform: d.tb.style.transform }, { transform: go ? 'translateX(0)' : 'translateX(-28%)' }], { duration: go ? 240 : 280, easing: EASE, fill: 'forwards' });
   after(a, go ? 240 : 280, () => {
-    a.cancel(); d.el.style.left = ''; d.el.classList.remove('moving', 'top');
+    a.cancel(); d.el.style.left = ''; d.el.classList.remove('moving', 'top'); bars(d.el).forEach(b => { b.getAnimations().forEach(x => x.cancel()); b.style.transform = ''; });
     if (go) { const y = scrolls.pop() || 0; quiet = true; actions.closeScreen(); save(); render(); quiet = false; window.scrollTo(0, y); }
-    d.under.remove();
+    d.under.remove(); resetTabs();
   });
 }
 document.addEventListener('pointerup', endDrag, { passive: true });
