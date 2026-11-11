@@ -36,7 +36,9 @@ const kg = n => (n == null ? '' : String(Math.round(n * 100) / 100));
 const allEx = () => EXERCISES.concat(S.custom);
 const LEGACY = { Back: 'Lats', Shoulders: 'Side Delts', Pecho: 'Chest', Espalda: 'Lats', Hombro: 'Side Delts', 'Bíceps': 'Biceps', 'Tríceps': 'Triceps', 'Cuádriceps': 'Quads', Isquios: 'Hamstrings', 'Glúteo': 'Glutes', Gemelo: 'Calves', Abdomen: 'Abs' };
 const fixEx = e => (e && LEGACY[e.muscle] ? { ...e, muscle: LEGACY[e.muscle], sec: (e.sec || []).map(m => LEGACY[m] || m) } : e);
-const exById = id => fixEx(allEx().find(e => e.id === id)) || { id, name: 'Deleted exercise', muscle: 'Chest', sec: [], equip: 'Machine', inc: 2.5 };
+const exMod = id => (S.exMods || {})[id] || {};
+const withMods = e => (e && exMod(e.id).inc != null ? { ...e, inc: exMod(e.id).inc } : e);
+const exById = id => withMods(fixEx(allEx().find(e => e.id === id))) || { id, name: 'Deleted exercise', muscle: 'Chest', sec: [], equip: 'Machine', inc: 2.5 };
 const isWork = s => s.type !== 'w';
 const e1rm = (w, r, rir) => w * (1 + (r + (rir || 0)) / 30);
 const dayLabel = ts => new Date(ts).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -401,12 +403,12 @@ function doneThisCycle(dayIdx) {
 function render() {
   const keep = [...document.querySelectorAll('[data-keep]')].map(el => [el.dataset.keep, el.scrollLeft]);
   const full = ui.screen;
-  const view = full ? { active: viewActive, complete: viewComplete, preview: viewPreview, wsettings: viewWSettings, scsettings: viewScSettings, dashcfg: viewDashCfg, weight: viewWeight, program: viewProgram, analytics: viewAnalytics, history: viewHistory }[full]
+  const view = full ? { active: viewActive, complete: viewComplete, preview: viewPreview, wsettings: viewWSettings, scsettings: viewScSettings, dashcfg: viewDashCfg, exlib: viewExLib, weight: viewWeight, program: viewProgram, analytics: viewAnalytics, history: viewHistory }[full]
     : { dash: viewDash, workout: viewWorkout, levels: viewLevels, more: viewMore }[ui.tab];
   const app = document.getElementById('view');
   app.className = full ? 'screen-' + full : 'tab-' + ui.tab;
   app.innerHTML = view();
-  document.getElementById('tabs').hidden = !!full && !['analytics', 'weight', 'wsettings', 'scsettings', 'dashcfg'].includes(full);
+  document.getElementById('tabs').hidden = !!full && !['analytics', 'weight', 'wsettings', 'scsettings', 'dashcfg', 'exlib'].includes(full);
   document.querySelectorAll('#tabs [data-tab]').forEach(b => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
   const m = document.getElementById('modal');
   m.innerHTML = ui.sheet ? `<div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${viewSheet()}</div>` : '';
@@ -553,9 +555,11 @@ function viewProgram() {
   return `<header class="bar"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>${esc(p.name)}</h1><button class="ic" data-act="progMenu" aria-label="Program options">${I.sliders}</button></header>
     <div class="tabsrow" data-keep="days">${p.days.map((x, i) => `<button data-act="day" data-i="${i}" aria-selected="${i === ui.day}">${esc(x.name)}</button>`).join('')}<button data-act="addDay" aria-label="Add workout">+</button></div>
     <div class="pills" data-keep="ppills">
-      <button data-act="start" data-i="${ui.day}">${I.workout}Start</button>
+      <button data-act="sheet" data-type="gyms">${I.gym}${esc(gym().name)} ${I.down}</button>
       <button data-act="renameDay">${I.edit}Rename</button>
       <button data-act="reorder">${I.sort}Re-order</button>
+      <button data-act="dupDay">${I.note}Duplicate</button>
+      <button data-act="start" data-i="${ui.day}">${I.workout}Start</button>
       <button data-act="delDay">${I.trash}Delete</button></div>
     <section class="pad">
       <div class="h2row first"><h2>Target Muscles</h2><div class="seg mini"><button data-act="tmMode" data-v="" aria-pressed="${!ui.tmCycle}">Day</button><button data-act="tmMode" data-v="1" aria-pressed="${!!ui.tmCycle}">Cycle</button></div></div>
@@ -815,6 +819,21 @@ function viewWeight() {
     </section>`;
 }
 
+function viewExLib() {
+  const tab = ui.libTab || 'all', q = (ui.libQ || '').toLowerCase(), mus = ui.libMuscle || 'All';
+  const done = new Set(S.history.flatMap(h => h.items.map(i => i.ex)));
+  const inTab = e => tab === 'all' || (tab === 'performed' && done.has(e.id)) || (tab === 'depri' && exMod(e.id).depri) || (tab === 'modified' && (exMod(e.id).inc != null || String(e.id).startsWith('c-')));
+  const list = allEx().map(fixEx).filter(e => inTab(e) && (mus === 'All' || e.muscle === mus || (e.sec || []).includes(mus)) && e.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+  const row = e => `<button class="pk" data-act="exDetail" data-ex="${esc(e.id)}">${thumb(e.id, 'tall')}<div><b>${esc(e.name)}</b><span>${e.muscle}${(e.sec || []).length ? ' • ' + e.sec.join(', ') : ''}</span>${done.has(e.id) ? `<span>Performed ${S.history.filter(h => h.items.some(i => i.ex === e.id)).length} time${S.history.filter(h => h.items.some(i => i.ex === e.id)).length === 1 ? '' : 's'}</span>` : ''}</div>${I.right}</button>`;
+  return `<header class="bar"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>Exercises</h1><button class="ic" data-act="newExSheet" aria-label="Custom exercise">${I.plus}</button></header>
+    <div class="tabsrow" data-keep="libtabs">${[['all', 'All'], ['performed', 'Performed'], ['depri', 'Deprioritized'], ['modified', 'Modified']].map(([k, l]) => `<button data-act="libTab" data-t="${k}" aria-selected="${tab === k}">${l}</button>`).join('')}</div>
+    <section class="pad liblist">
+      <div class="mtiles" data-keep="libm">${MUSCLES.map(x => `<button data-act="libMuscle" data-m="${x}" aria-pressed="${mus === x}">${miniBody(x)}<span>${x}</span></button>`).join('')}</div>
+      <div id="libList">${GROUPS.map(([title, eqs]) => { const g = list.filter(e => eqs.includes(e.equip)); return g.length ? `<div class="h2row psec"><h3>${title}</h3><span class="muted">${g.length}</span></div>${g.map(row).join('')}` : ''; }).join('') || `<div class="card emptycard">${I.info}<p>${{ all: 'No exercise matches.', performed: 'Exercises you log will show here.', depri: 'Deprioritized exercises will show here. They are left out of swap suggestions.', modified: 'Custom exercises and the ones you change will show here.' }[tab]}</p></div>`}</div>
+    </section>
+    <div class="startbar libsearch"><label class="search">${I.search}<input type="search" placeholder="Search for an exercise" aria-label="Search for an exercise" data-bind="libQ" value="${esc(ui.libQ || '')}"></label></div>`;
+}
+
 function viewMore() {
   const n = S.history.length, th = S.settings.theme || 'system';
   const tile = (t, label) => `<button class="ttile t-${t}" data-act="theme" data-t="${t}" aria-pressed="${th === t}" aria-label="${label} theme"><b>Aa</b><span><i></i><i></i><i></i><i></i></span></button>`;
@@ -824,7 +843,7 @@ function viewMore() {
       <h2>General</h2>
       <div class="card rows">${mrow('sheet', I.scale, 'Units', 'data-type="units"')}${mrow('sheet', I.timer, 'Rest Timer', 'data-type="rest"')}${mrow('sheet', I.globe, 'Language', 'data-type="about"', '<b class="val">English</b>')}</div>
       <h2>Feature Settings</h2>
-      <div class="card rows">${mrow('open', I.dash, 'Dashboard', 'data-screen="dashcfg"')}${mrow('open', I.workout, 'Workout', 'data-screen="wsettings"')}${mrow('open', I.plus, 'Shortcuts', 'data-screen="scsettings"')}${mrow('open', I.scale, 'Weight Trend', 'data-screen="weight"')}${mrow('sheet', I.info, 'Exercises', 'data-type="exlib"')}${mrow('sheet', I.gym, 'Gym Profiles', 'data-type="gyms"')}</div>
+      <div class="card rows">${mrow('open', I.dash, 'Dashboard', 'data-screen="dashcfg"')}${mrow('open', I.workout, 'Workout', 'data-screen="wsettings"')}${mrow('open', I.plus, 'Shortcuts', 'data-screen="scsettings"')}${mrow('open', I.scale, 'Weight Trend', 'data-screen="weight"')}${mrow('open', I.info, 'Exercises', 'data-screen="exlib"')}${mrow('sheet', I.gym, 'Gym Profiles', 'data-type="gyms"')}</div>
       <h2>Theme</h2>
       <div class="themes">${tile('light', 'Light')}${tile('dark', 'Dark')}${tile('system', 'System')}</div>
       <h2>Data Management</h2>
@@ -889,7 +908,7 @@ function viewSheet() {
       <button class="btn primary" data-act="close">Done</button>`;
   if (m.type === 'swap') { const it = S.active.items[ui.cur], ex = exById(it.ex);
     const line = e => `${e.muscle}${(e.sec || []).length ? ' • ' + e.sec.join(', ') : ''}`;
-    const subs = allEx().map(fixEx).filter(e => e.id !== ex.id && e.muscle === ex.muscle).sort((a, b) => (b.equip === ex.equip) - (a.equip === ex.equip) || a.name.localeCompare(b.name)).slice(0, 6);
+    const subs = allEx().map(fixEx).filter(e => e.id !== ex.id && e.muscle === ex.muscle && !exMod(e.id).depri).sort((a, b) => (b.equip === ex.equip) - (a.equip === ex.equip) || a.name.localeCompare(b.name)).slice(0, 6);
     return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Swap</h2><span></span></div>
       <div class="pk cur">${thumb(ex.id, 'tall')}<div><b>${esc(ex.name)}</b><span>${line(ex)}</span></div></div>
       <h3 class="subh">Smart Substitutions</h3>
@@ -943,8 +962,19 @@ function viewSheet() {
       ${ws.length ? `<div class="card list">${ws.map(w => `<div><span>${new Date(w.t).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span><b>${w.kg.toFixed(1)} kg</b></div>`).join('')}</div>` : `<div class="card emptycard">${I.scale}<p>No weigh-ins yet. Add your first one with the + button.</p></div>`}`; }
   if (m.type === 'units') return `<h2>Units</h2><div class="card rows"><div class="mrow">${I.scale}<span>Weight</span><b>kg</b></div><div class="mrow">${I.timer}<span>Rest</span><b>seconds</b></div></div><button class="btn primary" data-act="close">Done</button>`;
   if (m.type === 'about') return `<h2>About</h2><p class="muted">Hierro is a personal strength training log. Everything you enter stays on this phone.</p><div class="card list"><div><span>Workouts logged</span><b>${S.history.length}</b></div><div><span>Exercises</span><b>${allEx().length}</b></div></div><button class="btn primary" data-act="close">Done</button>`;
-  if (m.type === 'exlib') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Exercises</h2><button class="ic" data-act="newExSheet" aria-label="Custom exercise">${I.plus}</button></div>
-    <div id="pickList">${allEx().map(e => `<div class="pk">${thumb(e.id)}<div><b>${esc(e.name)}</b>${chipsEx(e.id)}</div></div>`).join('')}</div>`;
+  if (m.type === 'exdetail') { const ex = exById(m.ex), rec = recordFor(ex.id), past = S.history.slice().reverse().map(h => ({ h, x: h.items.find(q => q.ex === ex.id) })).filter(p => p.x).slice(0, 8);
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>${esc(ex.name)}</h2><span></span></div>
+      <div class="media small">${thumb(ex.id, 'hero')}</div>
+      <h3 class="subh">Target Muscles</h3><div class="hscroll">${[[ex.muscle, 'Primary'], ...(ex.sec || []).map(x => [x, 'Secondary'])].map(([mm, k]) => `<div class="mcard">${miniBody(mm)}<div><b>${mm}</b><span>${k}</span></div></div>`).join('')}</div>
+      <h3 class="subh">Properties</h3>
+      <div class="card rows">
+        <div class="mrow srow">${I.gym}<span><b>Resistance Equipment</b>${ex.equip}</span></div>
+        <label class="mrow srow">${I.plates}<span><b>Weight Step</b>${exMod(ex.id).inc != null ? 'Modified' : 'Default'}</span><input class="numin" inputmode="decimal" data-bind="exInc" data-ex="${esc(ex.id)}" value="${kg(ex.inc)}" aria-label="Weight step in kg"></label>
+        <label class="mrow srow">${I.down}<span><b>Deprioritize</b>Leave it out of swap suggestions and list it last</span><input type="checkbox" data-bind="exDepri" data-ex="${esc(ex.id)}" ${exMod(ex.id).depri ? 'checked' : ''}></label>
+      </div>
+      <h3 class="subh">History</h3>
+      ${past.length ? `<div class="card list"><div><span>Best set</span><b>${rec ? `${rec.w ? kg(rec.w) + ' kg x ' : ''}${rec.r}` : '--'}</b></div>${past.map(p => `<div><span>${new Date(p.h.start).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}</span><b>${p.x.sets.filter(isWork).map(q => `${q.w ? kg(q.w) + ' x ' : ''}${q.r}`).join(', ')}</b></div>`).join('')}</div>` : `<div class="card emptycard">${I.hist}<p>You haven't logged this exercise yet.</p></div>`}
+      ${String(ex.id).startsWith('c-') ? `<button class="btn danger" data-act="exDelete" data-ex="${esc(ex.id)}">Delete Custom Exercise</button>` : ''}`; }
   if (m.type === 'gyms') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Gym Profiles</h2><span></span></div>
       <h3 class="subh">${S.gyms.length} Gym${S.gyms.length === 1 ? '' : 's'}</h3>
       ${S.gyms.map(g => `<div class="pk gymrow"><button class="grow gname" data-act="gymDefault" data-id="${g.id}">${I.gym}<div><b>${esc(g.name)}</b><span>${gymPieces(g)} pieces of equipment</span>${g.id === gym().id ? '<span>Default</span>' : ''}</div></button><button class="hbtn" data-act="gymOpen" data-id="${g.id}" aria-label="Edit ${esc(g.name)}">${I.edit}</button></div>`).join('')}
@@ -996,7 +1026,7 @@ const GROUPS = [['Free Weights', ['Barbell', 'Dumbbell']], ['Machines', ['Machin
 function pickList() {
   const m = ui.sheet, q = (m.q || '').toLowerCase();
   const ok = e => (!m.muscle || m.muscle === 'All' || e.muscle === m.muscle || (e.sec || []).includes(m.muscle)) && (m.gymOnly === false || gym().equip[e.equip] !== false) && e.name.toLowerCase().includes(q);
-  const list = allEx().map(fixEx).filter(ok).sort((x, y) => x.name.localeCompare(y.name));
+  const list = allEx().map(fixEx).filter(ok).sort((x, y) => (!!exMod(x.id).depri - !!exMod(y.id).depri) || x.name.localeCompare(y.name));
   const row = e => `<div class="pk">${thumb(e.id, 'tall')}<div><b>${esc(e.name)}</b><span>${e.muscle}${(e.sec || []).length ? ' • ' + e.sec.join(', ') : ''}</span></div><button class="hbtn" data-act="choose" data-ex="${esc(e.id)}" aria-label="Add ${esc(e.name)}">${I.plus}</button></div>`;
   return GROUPS.map(([title, eqs]) => { const g = list.filter(e => eqs.includes(e.equip)); if (!g.length) return ''; const open = m.open === title || q || g.length <= 4;
     return `<div class="h2row psec"><h3>${title}</h3>${g.length > 4 ? `<button class="link" data-act="pickOpen" data-g="${title}">${open && !q ? 'See Less' : `See ${g.length - 4} More`}</button>` : ''}</div>${(open ? g : g.slice(0, 4)).map(row).join('')}`; }).join('')
@@ -1022,6 +1052,11 @@ const actions = {
   tmMode(d) { ui.tmCycle = !!d.v; },
   flip() { ui.back = !ui.back; },
   wRange(d) { ui.wRange = d.r; },
+  libTab(d) { ui.libTab = d.t; },
+  libMuscle(d) { ui.libMuscle = ui.libMuscle === d.m ? 'All' : d.m; },
+  exDetail(d) { ui.sheet = { type: 'exdetail', ex: d.ex }; },
+  exDelete(d) { if (!confirm('Delete this custom exercise? Past workouts keep their numbers.')) return; S.custom = S.custom.filter(e => e.id !== d.ex); close(); },
+  dupDay() { const d = S.program.days[ui.day], copy = clone(d); copy.id = uid(); copy.name = d.name + ' Copy'; S.program.days.splice(ui.day + 1, 0, copy); ui.day += 1; toast('Workout duplicated.'); },
   dashSwap() { const c = dashCfg(); S.settings.dash = { focus: c.focus.slice().reverse(), off: c.off }; ui.dashPage = 0; },
   dashReset() { delete S.settings.dash; ui.dashPage = 0; toast('Dashboard reset.'); },
   scMode(d) { ui.scMode = d.v; },
@@ -1137,7 +1172,7 @@ const actions = {
     const equip = document.getElementById('nxEquip').value;
     const ex = { id: 'c-' + uid(), name, muscle: document.getElementById('nxMuscle').value, sec: [], equip, inc: equip === 'Bodyweight' ? 0 : (num(document.getElementById('nxInc').value) ?? 2.5) };
     S.custom.push(ex); const back = ui.sheet.back; ui.sheet = back;
-    if (back) choose(ex.id); else toast('Exercise saved.');
+    if (back) choose(ex.id); else { toast('Exercise saved.'); if (ui.screen === 'exlib') ui.libTab = 'modified'; }
   },
   choose(d) { choose(d.ex); },
   swapTo(d) { const it = curItem(); it.ex = d.ex; retarget(it, true); close(); toast('Swapped to ' + exById(d.ex).name + '.'); },
@@ -1179,6 +1214,9 @@ const binds = {
   ssNext(el) { curItem().ssNext = el.checked; render(); },
   wscheme(el, d) { const n = num(el.value); if (n == null || n <= 0) return; const sch = S.settings.warmScheme = (S.settings.warmScheme || [[50, 8], [70, 5], [85, 2]]).map(x => x.slice()); sch[+d.i][+d.f] = Math.round(n); },
   dashOn(el, d) { const c = dashCfg(); c.off[d.k] = !el.checked; if (el.checked) delete c.off[d.k]; S.settings.dash = c; },
+  exInc(el, d) { const n = num(el.value); if (n == null || n < 0) return; const m = S.exMods = S.exMods || {}; const base = fixEx(allEx().find(e => e.id === d.ex)); m[d.ex] = { ...(m[d.ex] || {}) }; if (base && base.inc === n) delete m[d.ex].inc; else m[d.ex].inc = n; },
+  exDepri(el, d) { const m = S.exMods = S.exMods || {}; m[d.ex] = { ...(m[d.ex] || {}), depri: el.checked }; },
+  libQ(el) { ui.libQ = el.value; render(); const i = document.querySelector('[data-bind=libQ]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } },
   flag(el, d) { S.settings[d.f] = el.checked; if (d.f === 'keepAwake') { if (el.checked) wake(); else if (lock) { try { lock.release(); } catch (e) { /* ya estaba suelto */ } lock = null; } } },
   planUp(el) { if (ui.done) ui.done.planUp = el.checked; },
   aitem(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(); it[d.f] = Math.round(n); if (it.hi < it.lo) it.hi = it.lo; },
@@ -1209,7 +1247,7 @@ const binds = {
 };
 function onField(e) {
   const el = e.target.closest('[data-bind]'); if (!el) return;
-  const b = el.dataset.bind, live = ['note', 'pickQ', 'progName', 'dayName', 'gymName'];
+  const b = el.dataset.bind, live = ['note', 'pickQ', 'progName', 'dayName', 'gymName', 'libQ'];
   if ((e.type === 'input') !== live.includes(b)) return;
   binds[b](el, el.dataset); save();
 }

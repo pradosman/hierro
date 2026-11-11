@@ -550,3 +550,10 @@ main[class^="screen-"] { padding-bottom: calc(env(safe-area-inset-bottom) + 24px
 .dashsecs > .h2row:first-child { margin-top: 0; }
 .bar h1 { min-width: 0; }
 .screen-dashcfg { padding-bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom) + 24px) !important; }
+
+/* ---- Biblioteca Exercises y botones del editor ---- */
+.liblist { padding-bottom: 96px; }
+.liblist .pk { width: 100%; text-align: left; } .liblist .pk > svg:last-child { background: none; color: var(--mid); width: 20px; height: 20px; padding: 0; }
+.libsearch { bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom)); padding: 10px 16px 12px; background: linear-gradient(transparent, var(--bg) 30%); }
+.media.small { height: 150px; border-radius: 12px; margin: 0; }
+.psec .muted { font-size: 14px; }
