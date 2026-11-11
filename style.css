@@ -538,3 +538,15 @@ main[class^="screen-"] { padding-bottom: calc(env(safe-area-inset-bottom) + 24px
 .numin { width: 78px; height: 40px; border-radius: 8px; border: 2px solid transparent; background: var(--fill); text-align: center; font-size: 16px; flex: none; }
 .numin:focus { outline: 0; border-color: var(--ink); background: var(--top); }
 .sheet .card.rows .srow { padding-left: 14px; padding-right: 14px; }
+
+/* ---- Ajustes de Smart Progression, Warm-Up y Customize Dashboard ---- */
+.schrow { min-height: 56px; gap: 8px; padding-left: 64px !important; }
+.schrow em { font-style: normal; color: var(--mut); font-size: 14px; flex: none; }
+.schrow .numin { width: 58px; }
+.schrow::before { display: none; }
+.warmdone { color: var(--mut); font-size: 14px; padding-left: 4px; }
+.ftile { padding: 16px; display: grid; grid-template-columns: 1fr auto; gap: 14px 8px; align-items: center; min-height: 130px; }
+.ftile b { font-size: 17px; font-weight: 500; } .ftile .ic { grid-column: 1 / -1; justify-self: center; background: var(--fill); width: 48px; height: 36px; border-radius: 18px; }
+.dashsecs > .h2row:first-child { margin-top: 0; }
+.bar h1 { min-width: 0; }
+.screen-dashcfg { padding-bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom) + 24px) !important; }

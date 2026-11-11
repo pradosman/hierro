@@ -193,7 +193,11 @@ function suggest(item, workIdx) {
   const rir = p.rir == null ? item.rir : p.rir;
   const eff = p.r + rir - item.rir; // reps que valdrían con la reserva pedida
   if (!p.w || !inc) return { tw: p.w || 0, tr: Math.max(item.lo, eff + 1), prev: p };
-  if (eff >= item.hi) return { tw: p.w + inc, tr: item.lo, prev: p };
+  if (eff >= item.hi) {
+    // Expand Rep Range: when one weight step is a big jump, ask for a few more reps first.
+    if (S.settings.expandRange !== false && inc / p.w > 0.08 && eff < item.hi + 3) return { tw: p.w, tr: eff + 1, prev: p };
+    return { tw: p.w + inc, tr: item.lo, prev: p };
+  }
   if (eff <= item.lo - 2) return { tw: Math.max(0, p.w - inc), tr: item.lo, prev: p };
   if (eff < item.lo) return { tw: p.w, tr: item.lo, prev: p };
   return { tw: p.w, tr: Math.min(item.hi, eff + 1), prev: p };
@@ -203,6 +207,7 @@ function retarget(item, fill) {
   item.sets.forEach(s => {
     if (!isWork(s)) return;
     const t = suggest(item, wi++);
+    if (S.settings.weightMatch === true) { if (wi === 1) item._tw = t.tw; else if (item._tw != null && t.tw != null) t.tw = item._tw; }
     s.tw = t.tw; s.tr = t.tr; s.prev = t.prev ? { w: t.prev.w, r: t.prev.r, rir: t.prev.rir } : null;
     if (fill && !s.done) { const smart = S.settings.smart !== false, pw = t.prev ? t.prev.w : null, pr = t.prev ? t.prev.r : null;
       s.w = smart ? (t.tw != null ? kg(t.tw) : '') : (pw != null ? kg(pw) : '');
@@ -212,6 +217,12 @@ function retarget(item, fill) {
 }
 const T = (it, s, f) => (s && s['t' + f] != null ? s['t' + f] : it[f]);
 const progItem = () => { const a = S.active; if (!a || a.dayIdx == null || !S.program || !S.program.days[a.dayIdx]) return null; return S.program.days[a.dayIdx].items.find(x => x.ex === a.items[ui.cur].ex) || null; };
+// Warm-up plan for one exercise, from the scheme in Settings and the weight of its first working set.
+function warmPlan(it) {
+  const first = it.sets.find(isWork), top = first && num(first.w); if (!top) return [];
+  const ex = exById(it.ex), step = S.settings.simpleWarm !== false && ex.equip === 'Barbell' ? 5 : (ex.inc || 2.5);
+  return (S.settings.warmScheme || [[50, 8], [70, 5], [85, 2]]).map(([p, r]) => [Math.max(step, roundTo(top * p / 100, step)), r]).filter(([w]) => w < top);
+}
 const newSet = type => ({ type: type || 'n', w: '', r: '', rir: '', partial: false, done: false, tw: null, tr: null, prev: null });
 function newItem(src) {
   const item = { ex: src.ex, lo: src.lo, hi: src.hi, rir: src.rir, rest: src.rest, ssNext: !!src.ssNext, note: '', sets: [] };
@@ -224,6 +235,7 @@ function newItem(src) {
 function startWorkout(dayIdx) {
   const d = dayIdx == null ? null : S.program.days[dayIdx];
   S.active = { dayIdx, dayName: d ? d.name : 'Empty Workout', start: Date.now(), items: d ? d.items.map(newItem) : [] };
+  if (S.settings.warmAuto) S.active.items.forEach(it => { const plan = warmPlan(it); if (plan.length) it.sets = plan.map(([w, r]) => ({ ...newSet('w'), w: kg(w), r: String(r) })).concat(it.sets); });
   ui.screen = 'active'; ui.cur = 0; ui.focus = null; ui.sheet = null;
   unlockAudio(); save(); wake();
 }
@@ -237,6 +249,7 @@ function completeSet(i, s) {
   if (!r || r < 1) { toast('Enter the reps.'); return false; }
   set.w = kg(w); set.r = String(Math.round(r));
   set.done = true;
+  if (isWork(set) && S.settings.smartLive !== false) item.sets.forEach((q, k) => { if (k > s && !q.done && isWork(q) && String(q.w || '') === '') q.w = set.w; });
   if (isWork(set)) {
     const items = S.active.items; let lo = i, hi = i;
     while (lo > 0 && items[lo - 1].ssNext) lo--;
@@ -388,12 +401,12 @@ function doneThisCycle(dayIdx) {
 function render() {
   const keep = [...document.querySelectorAll('[data-keep]')].map(el => [el.dataset.keep, el.scrollLeft]);
   const full = ui.screen;
-  const view = full ? { active: viewActive, complete: viewComplete, preview: viewPreview, wsettings: viewWSettings, scsettings: viewScSettings, weight: viewWeight, program: viewProgram, analytics: viewAnalytics, history: viewHistory }[full]
+  const view = full ? { active: viewActive, complete: viewComplete, preview: viewPreview, wsettings: viewWSettings, scsettings: viewScSettings, dashcfg: viewDashCfg, weight: viewWeight, program: viewProgram, analytics: viewAnalytics, history: viewHistory }[full]
     : { dash: viewDash, workout: viewWorkout, levels: viewLevels, more: viewMore }[ui.tab];
   const app = document.getElementById('view');
   app.className = full ? 'screen-' + full : 'tab-' + ui.tab;
   app.innerHTML = view();
-  document.getElementById('tabs').hidden = !!full && !['analytics', 'weight', 'wsettings', 'scsettings'].includes(full);
+  document.getElementById('tabs').hidden = !!full && !['analytics', 'weight', 'wsettings', 'scsettings', 'dashcfg'].includes(full);
   document.querySelectorAll('#tabs [data-tab]').forEach(b => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
   const m = document.getElementById('modal');
   m.innerHTML = ui.sheet ? `<div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${viewSheet()}</div>` : '';
@@ -413,25 +426,31 @@ const ring = (val, target, color, big) => {
     <div><b>${val}</b><span>${Math.max(0, target - val)} left</span></div></div>`;
 };
 
+const DASH_FOCUS = { cycle: 'Cycle Workouts', records: 'Recent Records' };
+const DASH_CARDS = [['Insights & Analytics', [['workouts', 'Workouts'], ['weight', 'Weight Trend']]], ['Habits', [['weighin', 'Weigh-In'], ['habitWorkouts', 'Workouts']]], ['Body Metrics', [['scale', 'Scale Weight']]], ['Muscle Groups', [['muscles', 'Top Muscle Groups']]]];
+const dashCfg = () => { const d = S.settings.dash || {}; return { focus: (d.focus || ['cycle', 'records']).filter(k => DASH_FOCUS[k]), off: d.off || {} }; };
 function viewDash() {
+  const cfg = dashCfg(), on = k => !cfg.off[k];
+  const pages = cfg.focus.filter(k => on('f_' + k)); ui.dashPage = Math.min(ui.dashPage, Math.max(0, pages.length - 1));
   const w = cycleProgress();
   const last = S.history.slice(-7);
-  const setsArr = last.map(h => sessionStats(h).sets), volArr = last.map(h => sessionStats(h).vol);
+  const setsArr = last.map(h => sessionStats(h).sets);
   const mx = Math.max(1, ...setsArr);
   const today = new Date().setHours(0, 0, 0, 0), ws = weekStart(Date.now());
   const grid = Array.from({ length: 30 }, (_, i) => { const t = today - (29 - i) * DAY; return S.history.some(h => h.start >= t && h.start < t + DAY); });
   const thisWeek = new Set(S.history.filter(h => h.start >= ws).map(h => new Date(h.start).toDateString())).size;
   const trend = weightTrend(), ws7 = weightsSorted().slice(-7);
-  const wgrid = Array.from({ length: 30 }, (_, i) => { const t = today - (29 - i) * DAY; return (S.weights || []).some(w => w.t >= t && w.t < t + DAY); });
-  const wWeek = new Set((S.weights || []).filter(w => w.t >= ws).map(w => new Date(w.t).toDateString())).size;
+  const wgrid = Array.from({ length: 30 }, (_, i) => { const t = today - (29 - i) * DAY; return (S.weights || []).some(x => x.t >= t && x.t < t + DAY); });
+  const wWeek = new Set((S.weights || []).filter(x => x.t >= ws).map(x => new Date(x.t).toDateString())).size;
   const m7 = muscleSets(Date.now() - 7 * DAY, Date.now() + DAY);
   const top2 = Object.entries(m7).sort((a, b) => b[1] - a[1]).slice(0, 2);
-  return `${hero('Dashboard', hbtn('tab', I.sliders, 'Settings', 'data-tab="more"'))}
-${ui.dashPage ? `<section class="top dashtop">
+  const focus = {
+    records: () => `<section class="top dashtop">
       <h2 class="rec-title">Recent Records</h2>
       <div class="recbars">${recentRecords().map(r => `<div><span>${esc(r.name)}</span><i><b style="width:${r.pct}%"></b>${r.label}</i></div>`).join('') || '<p class="muted">Log a workout to see your records.</p>'}</div>
       <div class="seg" role="group">${[['vol', 'Volume'], ['reps', 'Reps'], ['1rm', '1-RM']].map(([k, l]) => `<button data-act="recMode" data-m="${k}" aria-pressed="${ui.recMode === k}">${l}</button>`).join('')}</div>
-    </section>` : `    <section class="top dashtop">
+    </section>`,
+    cycle: () => `<section class="top dashtop">
       <h2>Cycle Workouts</h2>
       <div class="rings">${ring(w.muscles[0], w.muscles[1], 'var(--blue-soft)')}${ring(w.sets[0], w.sets[1], 'var(--coral)', true)}${ring(w.exs[0], w.exs[1], 'var(--cyan)')}</div>
       <div class="ring-labels">
@@ -440,39 +459,39 @@ ${ui.dashPage ? `<section class="top dashtop">
         <div><b>Exercises</b><span>${w.exs[1]} target</span></div>
       </div>
       <div class="seg" role="group"><button data-act="dashMode" data-m="prog" aria-pressed="${ui.dashMode === 'prog'}">Active Program</button><button data-act="dashMode" data-m="all" aria-pressed="${ui.dashMode === 'all'}">All Workouts</button></div>
-    </section>`}
-    <div class="pager"><button data-act="dashPage" data-p="0" class="${ui.dashPage ? '' : 'on'}" aria-label="Cycle Workouts"></button><button data-act="dashPage" data-p="1" class="${ui.dashPage ? 'on' : ''}" aria-label="Recent Records"></button></div>
-    <section class="pad">
-      <h2>Insights &amp; Analytics</h2>
-      <div class="two">
-        <button class="card tile" data-act="open" data-screen="analytics" data-metric="sets">
-          <b>Workouts</b><span>Last 7 Workouts</span>
+    </section>`,
+  };
+  const card = {
+    workouts: () => `<button class="card tile" data-act="open" data-screen="analytics" data-metric="sets"><b>Workouts</b><span>Last 7 Workouts</span>
           <div class="bars">${setsArr.map(v => `<i style="height:${Math.max(8, (v / mx) * 100)}%"></i>`).join('')}</div>
-          <p><b>${setsArr.length ? setsArr[setsArr.length - 1] : 0}</b> sets ${I.right}</p>
-        </button>
-        <button class="card tile" data-act="open" data-screen="weight">
-          <b>Weight Trend</b><span>Last 7 Days</span>
-          ${lineSvg(trend.slice(-7).map(w => w.kg), '')}
-          <p><b>${trend.length ? trend[trend.length - 1].kg.toFixed(1) : '--'}</b> kg ${I.right}</p>
-        </button>
-      </div>
-      <h2>Habits</h2>
-      <div class="two">
-        <button class="card tile" data-act="sheet" data-type="weight">
-          <b>Weigh-In</b><span>Last 30 Days</span>
-          <div class="dotgrid">${wgrid.map(on => `<i class="${on ? 'on g' : ''}"></i>`).join('')}</div>
-          <p><b>${wWeek}/7</b> this week ${I.right}</p>
-        </button>
-        <button class="card tile" data-act="open" data-screen="history">
-          <b>Workouts</b><span>Last 30 Days</span>
-          <div class="dotgrid">${grid.map(on => `<i class="${on ? 'on' : ''}"></i>`).join('')}</div>
-          <p><b>${thisWeek}</b> this week ${I.right}</p>
-        </button>
-      </div>
-      <div class="h2row"><h2>Body Metrics</h2><button class="link" data-act="open" data-screen="weight">See All</button></div>
-      <div class="two"><button class="card tile" data-act="sheet" data-type="weight"><b>Scale Weight</b><span>Last 7 Entries</span>${lineSvg(ws7.map(w => w.kg), 'green')}<p><b>${ws7.length ? ws7[ws7.length - 1].kg.toFixed(1) : '--'}</b> kg ${I.right}</p></button></div>
-      <div class="h2row"><h2>Muscle Groups</h2><button class="link" data-act="tab" data-tab="levels">See All</button></div>
-      <div class="two">${top2.map(([m, v]) => `<button class="card tile" data-act="tab" data-tab="levels"><b>${m}</b><span>Last 7 Days</span><div class="spark"></div><p><b>${v ? kg(v) : '--'}</b> sets ${I.right}</p></button>`).join('')}</div>
+          <p><b>${setsArr.length ? setsArr[setsArr.length - 1] : 0}</b> sets ${I.right}</p></button>`,
+    weight: () => `<button class="card tile" data-act="open" data-screen="weight"><b>Weight Trend</b><span>Last 7 Days</span>
+          ${lineSvg(trend.slice(-7).map(x => x.kg), '')}<p><b>${trend.length ? trend[trend.length - 1].kg.toFixed(1) : '--'}</b> kg ${I.right}</p></button>`,
+    weighin: () => `<button class="card tile" data-act="sheet" data-type="weight"><b>Weigh-In</b><span>Last 30 Days</span>
+          <div class="dotgrid">${wgrid.map(o => `<i class="${o ? 'on g' : ''}"></i>`).join('')}</div><p><b>${wWeek}/7</b> this week ${I.right}</p></button>`,
+    habitWorkouts: () => `<button class="card tile" data-act="open" data-screen="history"><b>Workouts</b><span>Last 30 Days</span>
+          <div class="dotgrid">${grid.map(o => `<i class="${o ? 'on' : ''}"></i>`).join('')}</div><p><b>${thisWeek}</b> this week ${I.right}</p></button>`,
+    scale: () => `<button class="card tile" data-act="sheet" data-type="weight"><b>Scale Weight</b><span>Last 7 Entries</span>${lineSvg(ws7.map(x => x.kg), 'green')}<p><b>${ws7.length ? ws7[ws7.length - 1].kg.toFixed(1) : '--'}</b> kg ${I.right}</p></button>`,
+    muscles: () => top2.map(([m, v]) => `<button class="card tile" data-act="tab" data-tab="levels"><b>${m}</b><span>Last 7 Days</span><div class="spark"></div><p><b>${v ? kg(v) : '--'}</b> sets ${I.right}</p></button>`).join(''),
+  };
+  const LINK = { 'Body Metrics': 'data-act="open" data-screen="weight"', 'Muscle Groups': 'data-act="tab" data-tab="levels"' };
+  const sections = DASH_CARDS.map(([title, cards]) => { const vis = cards.filter(([k]) => on(k)); if (!vis.length) return '';
+    return `<div class="h2row"><h2>${title.replace('&', '&amp;')}</h2>${LINK[title] ? `<button class="link" ${LINK[title]}>See All</button>` : ''}</div><div class="two">${vis.map(([k]) => card[k]()).join('')}</div>`; }).join('');
+  return `${hero('Dashboard', hbtn('open', I.sliders, 'Customize dashboard', 'data-screen="dashcfg"'))}
+    ${pages.length ? focus[pages[ui.dashPage]]() : ''}
+    ${pages.length > 1 ? `<div class="pager">${pages.map((k, i) => `<button data-act="dashPage" data-p="${i}" class="${ui.dashPage === i ? 'on' : ''}" aria-label="${DASH_FOCUS[k]}"></button>`).join('')}</div>` : ''}
+    <section class="pad dashsecs">${sections || '<p class="muted">Every card is hidden. Turn some back on with the button at the top.</p>'}</section>`;
+}
+
+function viewDashCfg() {
+  const cfg = dashCfg(), on = k => !cfg.off[k];
+  return `<header class="bar"><button class="ic" data-act="closeScreen" aria-label="Back">${I.back}</button><h1>Customize Dashboard</h1><button class="ic savebtn" data-act="closeScreen">Save</button></header>
+    <section class="pad">
+      <h2>Primary Focus</h2>
+      <div class="two">${cfg.focus.map((k, i) => `<div class="card ftile"><b>${DASH_FOCUS[k]}</b><input type="checkbox" class="swc" data-bind="dashOn" data-k="f_${k}" ${on('f_' + k) ? 'checked' : ''} aria-label="Show ${DASH_FOCUS[k]}">
+        <button class="ic" data-act="dashSwap" aria-label="Move ${DASH_FOCUS[k]} ${i ? 'left' : 'right'}">${i ? I.back : I.right}</button></div>`).join('')}</div>
+      ${DASH_CARDS.map(([title, cards]) => `<h2>${title.replace('&', '&amp;')}</h2><div class="card rows">${cards.map(([k, label]) => `<label class="mrow srow"><span><b>${label}</b></span><input type="checkbox" data-bind="dashOn" data-k="${k}" ${on(k) ? 'checked' : ''}></label>`).join('')}</div>`).join('')}
+      <button class="btn" data-act="dashReset">Reset to App Defaults</button>
     </section>`;
 }
 
@@ -592,6 +611,7 @@ function viewActive() {
       <div class="row head"><span>Set</span><button data-act="colMode">${ui.colMode === 'prev' ? 'Previous' : 'Auto'} ${I.swap}</button><span>kg</span><span>Reps</span>
         <button class="box ${it.sets.length && doneCount === it.sets.length ? 'on' : ''}" data-act="checkAll" aria-label="Check all sets">${it.sets.length && doneCount === it.sets.length ? I.check : ''}</button></div>
       ${it.sets.map((s, j) => {
+        if (s.type === 'w' && s.done && S.settings.hideWarmDone !== false) return '';
         const label = s.type === 'w' ? 'W' : ++n;
         let mid = '-';
         if (s.type === 'w') mid = 'Warm Up';
@@ -605,6 +625,7 @@ function viewActive() {
           <button class="cell ${f === 'r' ? 'focus' : ''}" data-act="focus" data-s="${j}" data-f="r" aria-label="Reps">${esc(s.r) || '&nbsp;'}${s.partial ? '<em>P</em>' : ''}${rirBadge(s.rir)}</button>
           <button class="box ${s.done ? 'on' : ''}" data-act="check" data-s="${j}" aria-pressed="${s.done}" aria-label="Set done">${s.done ? I.check : ''}</button>
         </div>`; }).join('')}
+      ${S.settings.hideWarmDone !== false && it.sets.some(q => q.type === 'w' && q.done) ? `<p class="warmdone">${it.sets.filter(q => q.type === 'w' && q.done).length} warm-up sets done</p>` : ''}
       <button class="num add" data-act="addSet" aria-label="Add set">${I.plus}</button>
     </div>
     <button class="notecard" data-act="noteSheet"><b>Program Note</b>${I.pin}<span>${esc((progItem() || {}).note) || 'Standard Set'}</span></button>` : `<div class="pad"><p class="muted">This workout is empty. Tap + to add an exercise.</p></div>`}
@@ -803,7 +824,7 @@ function viewMore() {
       <h2>General</h2>
       <div class="card rows">${mrow('sheet', I.scale, 'Units', 'data-type="units"')}${mrow('sheet', I.timer, 'Rest Timer', 'data-type="rest"')}${mrow('sheet', I.globe, 'Language', 'data-type="about"', '<b class="val">English</b>')}</div>
       <h2>Feature Settings</h2>
-      <div class="card rows">${mrow('tab', I.dash, 'Dashboard', 'data-tab="dash"')}${mrow('open', I.workout, 'Workout', 'data-screen="wsettings"')}${mrow('open', I.plus, 'Shortcuts', 'data-screen="scsettings"')}${mrow('open', I.scale, 'Weight Trend', 'data-screen="weight"')}${mrow('sheet', I.info, 'Exercises', 'data-type="exlib"')}${mrow('sheet', I.gym, 'Gym Profiles', 'data-type="gyms"')}</div>
+      <div class="card rows">${mrow('open', I.dash, 'Dashboard', 'data-screen="dashcfg"')}${mrow('open', I.workout, 'Workout', 'data-screen="wsettings"')}${mrow('open', I.plus, 'Shortcuts', 'data-screen="scsettings"')}${mrow('open', I.scale, 'Weight Trend', 'data-screen="weight"')}${mrow('sheet', I.info, 'Exercises', 'data-type="exlib"')}${mrow('sheet', I.gym, 'Gym Profiles', 'data-type="gyms"')}</div>
       <h2>Theme</h2>
       <div class="themes">${tile('light', 'Light')}${tile('dark', 'Dark')}${tile('system', 'System')}</div>
       <h2>Data Management</h2>
@@ -874,8 +895,7 @@ function viewSheet() {
       <h3 class="subh">Smart Substitutions</h3>
       ${subs.map(e => `<div class="pk">${thumb(e.id, 'tall')}<div><b>${esc(e.name)}</b><span>${line(e)}</span></div><button class="hbtn" data-act="swapTo" data-ex="${esc(e.id)}" aria-label="Swap to ${esc(e.name)}">${I.swap}</button></div>`).join('') || '<p class="muted">No close substitutes for this one.</p>'}
       <button class="btn" data-act="pick" data-for="swap" data-muscle="${esc(ex.muscle)}">Find Other Replacements</button>`; }
-  if (m.type === 'warm') { const it = S.active.items[ui.cur], first = it.sets.find(isWork), top = first && num(first.w);
-    const step = exById(it.ex).inc || 2.5, plan = top ? [[0.5, 8], [0.7, 5], [0.85, 2]].map(([f, r]) => [roundTo(top * f, step), r]) : [];
+  if (m.type === 'warm') { const it = S.active.items[ui.cur], plan = warmPlan(it);
     return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Warm Up</h2><span></span></div>
       <div class="h2row first"><h2>Set Calculator</h2><div class="seg mini"><button data-act="warmMode" data-v="smart" aria-pressed="${ui.warmMode === 'smart'}">Smart</button><button data-act="warmMode" data-v="scheme" aria-pressed="${ui.warmMode === 'scheme'}">Scheme</button></div></div>
       ${plan.length ? `<div class="card list">${plan.map(([w, r], i) => `<div><span>Warm-up ${i + 1}</span><b>${kg(w)} kg x ${r}</b></div>`).join('')}</div><button class="btn primary" data-act="warmup">Add warm-up sets</button>`
@@ -942,11 +962,24 @@ function viewSheet() {
           ${k === 'plates' ? '' : `<button class="box ${on(k) ? 'on' : ''}" data-act="eqToggle" data-id="${g.id}" data-k="${k}" aria-pressed="${on(k)}" aria-label="${label}">${on(k) ? I.check : ''}</button>`}</div>`).join('')}`; }).join('')}
       <div class="pbottom"><label class="search">${I.search}<input type="search" placeholder="Filter equipment by name" aria-label="Filter equipment by name" data-bind="eqQ" value="${esc(m.q || '')}"></label></div>`; }
   if (m.type === 'smart') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Smart Progression</h2><span></span></div>
-    ${sw('smart', I.wand, 'Smart Progression', 'Fill each set with the weight and reps to beat. When it is off, sets are filled with what you did last time.')}
-    <p class="muted">The rule: reach the top of the rep range with your target RIR, then the weight goes up one step and the reps go back to the bottom.</p><button class="btn primary" data-act="close">Done</button>`;
-  if (m.type === 'warmcfg') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Warm-Up</h2><span></span></div>
-    <div class="card list"><div><span>Warm-up 1</span><b>50 % x 8</b></div><div><span>Warm-up 2</span><b>70 % x 5</b></div><div><span>Warm-up 3</span><b>85 % x 2</b></div></div>
-    <p class="muted">Percentages of the weight of your first working set, rounded to the step of the exercise.</p><button class="btn primary" data-act="close">Done</button>`;
+    <div class="card rows">
+      ${sw('smart', I.wand, 'Smart Progression', 'Fill each set with the weight and reps to beat')}
+      ${sw('smartLive', I.enter, 'Apply in session', 'After you finish a set, fill the weight of the later sets that are still empty')}
+      ${sw('expandRange', I.sort, 'Expand Rep Range', 'When one weight step is a big jump, ask for a few more reps before adding weight')}
+      ${sw('weightMatch', I.plates, 'Weight Match', 'Use the weight of the first set for every set of the exercise', false)}
+    </div>
+    <button class="btn primary" data-act="close">Done</button>`;
+  if (m.type === 'warmcfg') { const sch = S.settings.warmScheme || [[50, 8], [70, 5], [85, 2]];
+    return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Warm-Up</h2><span></span></div>
+    <h3 class="subh">Behavior</h3>
+    <div class="card rows">
+      <div class="mrow srow">${I.wand}<span><b>Warm-Up Automation</b>${S.settings.warmAuto ? 'Smart Warm-Up' : 'Off'}</span><button class="editbtn" data-act="warmAuto">Edit</button></div>
+      <div class="mrow srow scheme">${I.warm}<span><b>Warm-Up Scheme</b>Percent of your first working set, and reps</span></div>
+      ${sch.map(([p, r], i) => `<div class="mrow srow schrow"><span><b>Warm-up ${i + 1}</b></span><input class="numin" inputmode="numeric" data-bind="wscheme" data-i="${i}" data-f="0" value="${p}" aria-label="Percent"><em>%</em><input class="numin" inputmode="numeric" data-bind="wscheme" data-i="${i}" data-f="1" value="${r}" aria-label="Reps"><em>reps</em></div>`).join('')}
+      ${sw('hideWarmDone', I.check, 'Hide Completed Sets', 'Hide warm-up sets from the table once they are done')}
+      ${sw('simpleWarm', I.plates, 'Simplify Warm-Up Plates', 'Round barbell warm-up weights to the nearest 5 kg')}
+    </div>
+    <button class="btn primary" data-act="close">Done</button>`; }
   if (m.type === 'rest') return `<div class="shead"><button class="ic" data-act="close" aria-label="Close">${I.x}</button><h2>Rest Timer</h2><span></span></div>
     <h3 class="subh">Behavior</h3>
     <div class="card rows">
@@ -989,6 +1022,8 @@ const actions = {
   tmMode(d) { ui.tmCycle = !!d.v; },
   flip() { ui.back = !ui.back; },
   wRange(d) { ui.wRange = d.r; },
+  dashSwap() { const c = dashCfg(); S.settings.dash = { focus: c.focus.slice().reverse(), off: c.off }; ui.dashPage = 0; },
+  dashReset() { delete S.settings.dash; ui.dashPage = 0; toast('Dashboard reset.'); },
   scMode(d) { ui.scMode = d.v; },
   scMove(d) { const o = scOrder(), i = o.indexOf(d.k), j = i + +d.dir; if (j < 0 || j >= o.length) return; [o[i], o[j]] = [o[j], o[i]]; S.settings.scOrder = o; },
   scColor(d) { const c = S.settings.scColor = S.settings.scColor || {}; c[d.k] = ((c[d.k] || 0) + 1) % SC_COLORS.length; },
@@ -1068,16 +1103,16 @@ const actions = {
   infoTab(d) { ui.infoTab = d.t; },
   warmSheet() { ui.sheet = { type: 'warm' }; },
   warmMode(d) { ui.warmMode = d.v; },
+  warmAuto() { S.settings.warmAuto = !S.settings.warmAuto; },
   warmEmpty() { const it = curItem(); it.sets.unshift(newSet('w')); close(); },
   noteSheet() { ui.sheet = { type: 'note' }; },
   noteTab(d) { ui.noteTab = d.t; },
   addSetKeep() { const it = curItem(); it.sets.push(newSet()); retarget(it, true); },
   trir(d) { const it = curItem(), q = it.sets[d.s]; q.trir = (T(it, q, 'rir') + 1) % 7; if (!q.done) q.rir = String(q.trir); },
   warmup() {
-    const it = curItem(), first = it.sets.find(isWork), top = first && num(first.w);
-    if (!top) return toast('Enter the weight of your first set first.');
-    const step = exById(it.ex).inc || 2.5;
-    const warm = [[0.5, 8], [0.7, 5], [0.85, 2]].map(([f, r]) => ({ ...newSet('w'), w: kg(roundTo(top * f, step)), r: String(r) }));
+    const it = curItem(), plan = warmPlan(it);
+    if (!plan.length) return toast('Enter the weight of your first set first.');
+    const warm = plan.map(([w, r]) => ({ ...newSet('w'), w: kg(w), r: String(r) }));
     it.sets = warm.concat(it.sets.filter(isWork)); ui.focus = null; close();
   },
   delEx() { if (confirm('Remove this exercise from the workout?')) { S.active.items.splice(ui.cur, 1); ui.cur = Math.max(0, ui.cur - 1); ui.focus = null; } },
@@ -1142,6 +1177,8 @@ const binds = {
   gymF(el, d) { const g = gym(d.id); if (d.f === 'bar') { const n = num(el.value); if (n != null && n >= 0) g.bar = n; } else { const p = el.value.split(/[\s;,]+/).map(num).filter(n => n > 0); if (p.length) g.plates = p; } },
   eqQ(el) { ui.sheet.q = el.value; },
   ssNext(el) { curItem().ssNext = el.checked; render(); },
+  wscheme(el, d) { const n = num(el.value); if (n == null || n <= 0) return; const sch = S.settings.warmScheme = (S.settings.warmScheme || [[50, 8], [70, 5], [85, 2]]).map(x => x.slice()); sch[+d.i][+d.f] = Math.round(n); },
+  dashOn(el, d) { const c = dashCfg(); c.off[d.k] = !el.checked; if (el.checked) delete c.off[d.k]; S.settings.dash = c; },
   flag(el, d) { S.settings[d.f] = el.checked; if (d.f === 'keepAwake') { if (el.checked) wake(); else if (lock) { try { lock.release(); } catch (e) { /* ya estaba suelto */ } lock = null; } } },
   planUp(el) { if (ui.done) ui.done.planUp = el.checked; },
   aitem(el, d) { const n = num(el.value); if (n == null || n < 0) return; const it = curItem(); it[d.f] = Math.round(n); if (it.hi < it.lo) it.hi = it.lo; },
